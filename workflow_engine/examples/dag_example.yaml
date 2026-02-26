@@ -1,0 +1,53 @@
+# DAG工作流示例
+name: "DAG并行示例"
+version: "1.0"
+description: "展示DAG依赖和并行执行的工作流"
+
+steps:
+  - id: "step1"
+    name: "开始节点"
+    task_def:
+      id: "task1"
+      name: "初始化"
+      executor_type: "script"
+    
+  - id: "step2"
+    name: "并行A"
+    task_def:
+      id: "task2"
+      name: "任务A"
+      executor_type: "script"
+    
+  - id: "step3"
+    name: "并行B"
+    task_def:
+      id: "task3"
+      name: "任务B"
+      executor_type: "script"
+    
+  - id: "step4"
+    name: "并行C"
+    task_def:
+      id: "task4"
+      name: "任务C"
+      executor_type: "script"
+    
+  - id: "step5"
+    name: "汇总"
+    task_def:
+      id: "task5"
+      name: "汇总结果"
+      executor_type: "script"
+
+# 依赖关系
+depends_on:
+  step2:
+    - step1
+  step3:
+    - step1
+  step4:
+    - step1
+  step5:
+    - step2
+    - step3
+    - step4

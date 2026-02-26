@@ -1,0 +1,44 @@
+# Hello World Workflow Example
+# 这是一个3步骤的简单工作流示例
+
+id: "hello-world"
+name: "Hello World Workflow"
+version: "1.0"
+description: "一个简单的3步骤工作流示例"
+
+steps:
+  - id: "step1"
+    name: "第一步：初始化"
+    description: "初始化工作流环境"
+    next_steps:
+      - "step2"
+  
+  - id: "step2"
+    name: "第二步：处理数据"
+    description: "模拟数据处理任务"
+    task:
+      id: "task1"
+      name: "数据处理任务"
+      description: "处理输入数据"
+      executor_type: "agent"
+      agent_selector:
+        agent_type: "dev-engineer"
+        capabilities:
+          - "coding"
+          - "testing"
+      input_params:
+        mode: "demo"
+    next_steps:
+      - "step3"
+  
+  - id: "step3"
+    name: "第三步：输出结果"
+    description: "输出处理结果"
+    next_steps: []
+
+metadata:
+  author: "architect"
+  created: "2026-02-25"
+  tags:
+    - "example"
+    - "demo"

@@ -1,0 +1,19 @@
+# Workflow Engine Configuration
+
+server:
+  host: "0.0.0.0"
+  port: 8000
+  reload: true
+
+database:
+  url: "sqlite:///./workflow_engine.db"
+  echo: false
+
+logging:
+  level: "INFO"
+  format: "json"
+  file: "logs/workflow_engine.log"
+
+workflow:
+  default_timeout: 3600
+  max_retries: 3
