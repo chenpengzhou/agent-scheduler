@@ -5,7 +5,7 @@ from abc import ABC, abstractmethod
 from typing import Dict, Optional, List
 from datetime import datetime
 
-from workflow_engine.models.workflow import (
+from workflow_platform.models.workflow import (
     WorkflowInstance, 
     StepInstance, 
     TaskInstance,

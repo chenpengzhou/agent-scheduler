@@ -20,7 +20,7 @@ from .models.workflow import (
 )
 from .engine.core import WorkflowEngine
 from .engine.dag import DAG, DAGExecutor, DAGBuilder
-from .engine.executor import ParallelExecutor
+from .engine.executor import WorkflowExecutor
 from .models.condition import Condition, ConditionEvaluator, ExecutionStrategy
 from .models.approval import (
     ApprovalInstance,
@@ -45,7 +45,7 @@ __all__ = [
     "DAG",
     "DAGExecutor",
     "DAGBuilder",
-    "ParallelExecutor",
+    "WorkflowExecutor",
     # 条件
     "Condition",
     "ConditionEvaluator",

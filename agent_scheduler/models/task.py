@@ -54,6 +54,7 @@ class Task:
     
     # 执行信息
     assigned_agent_id: str = ""  # 分配的Agent
+    next_agent_id: str = ""     # 下一个处理者
     executor_type: str = "agent"  # 执行器类型
     executor_params: Dict[str, Any] = field(default_factory=dict)  # 执行参数
     

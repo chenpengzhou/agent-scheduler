@@ -7,9 +7,9 @@ import yaml
 import json
 from pathlib import Path
 
-from workflow_engine.models.workflow import WorkflowDefinition, StepDefinition, TaskDefinition, AgentSelector
-from workflow_engine.engine.core import WorkflowEngine
-from workflow_engine.engine.state import InMemoryStateManager
+from workflow_platform.models.workflow import WorkflowDefinition, StepDefinition, TaskDefinition, AgentSelector
+from workflow_platform.engine.core import WorkflowEngine
+from workflow_platform.engine.state import InMemoryStateManager
 
 
 def load_workflow_from_file(file_path: str) -> WorkflowDefinition:

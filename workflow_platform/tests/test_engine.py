@@ -4,7 +4,7 @@
 import unittest
 from datetime import datetime
 
-from workflow_engine.models.workflow import (
+from workflow_platform.models.workflow import (
     WorkflowDefinition,
     WorkflowInstance,
     StepDefinition,
@@ -13,8 +13,8 @@ from workflow_engine.models.workflow import (
     TaskDefinition,
     AgentSelector,
 )
-from workflow_engine.engine.state import InMemoryStateManager
-from workflow_engine.engine.core import WorkflowEngine
+from workflow_platform.engine.state import InMemoryStateManager
+from workflow_platform.engine.core import WorkflowEngine
 
 
 class TestWorkflowModels(unittest.TestCase):

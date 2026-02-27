@@ -6,6 +6,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from datetime import datetime
 
 from agent_scheduler.api.routes import agents, roles, demands, tasks, pipeline, monitor, notifications, messages, queue, workflow, agent_status, monitor_extended
+
+# 工作流引擎模块
+from workflow_platform.api import templates_router, executions_router
 from agent_scheduler.api.routes.demands import demands_db
 from agent_scheduler.api.routes.agents import agents_db
 from agent_scheduler.api.routes.tasks import tasks_db
@@ -42,6 +45,10 @@ app.include_router(workflow.router)
 app.include_router(agent_status.router)
 app.include_router(monitor_extended.router)
 
+# 工作流引擎路由
+app.include_router(templates_router)
+app.include_router(executions_router)
+
 # 任务监控路由
 from task_monitor.api.routes import task_monitor, duration
 app.include_router(task_monitor.router)
@@ -57,6 +64,10 @@ workflow.init_service(agents_db, tasks_db)
 agent_status.init_service(agents_db)
 task_monitor.init_service(tasks_db)
 duration.init_service(tasks_db)
+
+# 工作流引擎初始化
+from workflow_platform.api import init_all
+init_all()
 
 
 @app.get("/")

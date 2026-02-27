@@ -5,12 +5,12 @@
 import sys
 sys.path.insert(0, '.')
 
-from workflow_engine import (
+from workflow_platform import (
     WorkflowEngine, ParallelExecutor, DAGExecutor, DAGBuilder,
     WorkflowDefinition, WorkflowInstance, StepDefinition, TaskDefinition,
     StepType, ApprovalService, NotificationService
 )
-from workflow_engine.models.workflow import WorkflowStatus, StepStatus
+from workflow_platform.models.workflow import WorkflowStatus, StepStatus
 
 
 def test_iteration1_simple_workflow():
