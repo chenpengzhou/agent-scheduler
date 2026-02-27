@@ -23,6 +23,7 @@ class AgentCreate(BaseModel):
     capabilities: List[str] = []
     max_concurrent_tasks: int = 1
     role_id: Optional[str] = None
+    id: Optional[str] = None  # 允许自定义ID
 
 
 class AgentUpdate(BaseModel):
@@ -77,7 +78,8 @@ class StatusHistoryItem(BaseModel):
 @router.post("", response_model=AgentResponse)
 async def create_agent(agent: AgentCreate):
     """创建Agent"""
-    agent_id = str(uuid.uuid4())
+    # 使用用户提供的ID或生成UUID
+    agent_id = agent.id if agent.id else str(uuid.uuid4())
     now = datetime.now()
     
     # 转换capabilities为带评分格式

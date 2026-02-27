@@ -33,21 +33,21 @@ class ApprovalNotificationRequest(BaseModel):
     demand_id: str
     demand_title: str
     approver_id: str
-    action: str  # requested, approved, rejected
+    action: str = "requested"  # requested, approved, rejected
 
 
 class TaskNotificationRequest(BaseModel):
     task_id: str
     task_name: str
     agent_id: str
-    action: str  # assigned, started, completed, failed
+    action: str = "assigned"  # assigned, started, completed, failed
 
 
 class DemandNotificationRequest(BaseModel):
     demand_id: str
     demand_title: str
     owner_id: str
-    action: str  # created, completed, stage_changed
+    action: str = "created"  # created, completed, stage_changed
 
 
 # API路由

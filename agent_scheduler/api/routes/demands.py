@@ -20,9 +20,10 @@ class DemandCreate(BaseModel):
     category: str = "功能"  # 功能/Bug/优化
     tags: List[str] = []
     owner_id: str = ""
-    priority: int = 2  # 0-3
+    priority: int = 2  # 0-10, 支持数字
     estimated_hours: float = 0.0
     acceptance_criteria: str = ""
+    stage: str = "WATCHING"  # 支持指定阶段
 
 
 class DemandUpdate(BaseModel):

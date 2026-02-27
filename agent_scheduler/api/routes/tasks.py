@@ -23,7 +23,7 @@ class TaskCreate(BaseModel):
     description: str = ""
     demand_id: str = ""
     task_type: str = "AGENT"  # AGENT, SCRIPT, API
-    priority: int = 2  # 0-3
+    priority: int = 2  # 0-10, 支持数字
     executor_type: str = "agent"
     executor_params: dict = {}
     input_data: dict = {}
@@ -124,13 +124,15 @@ async def create_task(task: TaskCreate):
     
     tasks_db[task_id] = task_data
     
-    # 提交到调度引擎 - 转换为TaskPriority枚举
+    # 提交到调度引擎 - 转换为TaskPriority枚举（支持0-10）
     from agent_scheduler.models.task import Task as TaskModel, TaskPriority as TTPriority
+    # 将priority限制在0-3范围内
+    priority_value = max(0, min(3, task.priority))
     task_model = TaskModel(
         id=task_id,
         name=task.name,
         task_type=task.task_type,
-        priority=TTPriority(task.priority),  # 转换为枚举
+        priority=TTPriority(priority_value),
         depends_on=task.depends_on,
         max_retries=task.max_retries
     )
