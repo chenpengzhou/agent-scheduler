@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from datetime import datetime
 
-from agent_scheduler.api.routes import agents, roles, demands, tasks, pipeline, monitor, notifications, messages, queue, workflow
+from agent_scheduler.api.routes import agents, roles, demands, tasks, pipeline, monitor, notifications, messages, queue, workflow, agent_status
 from agent_scheduler.api.routes.demands import demands_db
 from agent_scheduler.api.routes.agents import agents_db
 from agent_scheduler.api.routes.tasks import tasks_db
@@ -39,6 +39,7 @@ app.include_router(notifications.router)
 app.include_router(messages.router)
 app.include_router(queue.router)
 app.include_router(workflow.router)
+app.include_router(agent_status.router)
 
 # 任务监控路由
 from task_monitor.api.routes import task_monitor
@@ -51,6 +52,7 @@ notifications.init_service()
 messages.init_service()
 queue.init_service(tasks_db, agents_db)
 workflow.init_service(agents_db, tasks_db)
+agent_status.init_service(agents_db)
 task_monitor.init_service(tasks_db)
 
 
