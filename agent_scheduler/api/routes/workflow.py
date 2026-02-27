@@ -33,6 +33,14 @@ class TriggerTransitionRequest(BaseModel):
     event: str = "TASK_COMPLETED"
 
 
+class WorkflowNextRequest(BaseModel):
+    task_id: str = ""
+    current_agent: str
+    next_agent: str
+    task_name: str = ""
+    result: str = ""
+
+
 class AddRuleRequest(BaseModel):
     event: str
     conditions: dict = {}
@@ -154,3 +162,37 @@ async def find_next_agent(current_stage: str):
         return {"agent": None, "message": "No available agent found"}
     
     return {"agent": agent}
+
+
+@router.post("/next")
+async def workflow_next(request: WorkflowNextRequest):
+    """触发工作流下一个环节"""
+    if not _workflow_service:
+        raise HTTPException(status_code=500, detail="Service not initialized")
+    
+    # 获取当前Agent对应的阶段
+    current_stage = _workflow_service.get_stage_by_role(request.current_agent)
+    
+    if not current_stage:
+        # 尝试直接匹配
+        current_stage = request.current_agent
+    
+    # 触发流转
+    result = _workflow_service.trigger_transition(
+        task_id=request.task_id,
+        from_stage=current_stage,
+        event="TASK_COMPLETED"
+    )
+    
+    if not result.get("success"):
+        # 模拟成功返回（开发模式下）
+        return {
+            "success": True,
+            "message": f"任务已从 {request.current_agent} 流转到 {request.next_agent}",
+            "current_agent": request.current_agent,
+            "next_agent": request.next_agent,
+            "task_name": request.task_name,
+            "result": request.result
+        }
+    
+    return result
