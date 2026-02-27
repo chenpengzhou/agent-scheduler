@@ -1,53 +1,146 @@
-# Workflow Engine
+# 工作流引擎完整文档
 
-工作流引擎 - 让工作流能跑起来
+## 概述
 
-## 安装
+工作流引擎是一个支持DAG执行、并行处理、审批流程的自动化工作流系统。
+
+## 技术架构
+
+### 迭代版本
+
+| 迭代 | 功能 | 状态 |
+|------|------|------|
+| 迭代1 | MVP基础框架 | ✅ 完成 |
+| 迭代2 | 状态持久化 + API | ✅ 完成 |
+| 迭代3 | DAG + 并行执行 | ✅ 完成 |
+| 迭代4 | 审批 + 通知 | ✅ 完成 |
+| 迭代5 | 集成 + 测试 | ✅ 完成 |
+
+## 快速开始
+
+### 安装
 
 ```bash
 cd workflow_engine
 pip install -e .
 ```
 
-## 使用
+### 基本使用
 
-### 运行工作流
+```python
+from workflow_engine import WorkflowEngine, WorkflowDefinition, StepDefinition, TaskDefinition
+
+# 创建工作流
+steps = [
+    StepDefinition(
+        id='step1',
+        name='第一步',
+        task_def=TaskDefinition(id='t1', name='执行任务', executor_type='script')
+    )
+]
+
+wf_def = WorkflowDefinition(id='my-workflow', name='我的工作流', steps=steps)
+
+# 执行
+engine = WorkflowEngine()
+result = engine.execute(wf_def)
+print(result.status)
+```
+
+### DAG并行执行
+
+```python
+from workflow_engine import ParallelExecutor, WorkflowDefinition, StepDefinition, TaskDefinition
+
+steps = [
+    StepDefinition(id='s1', name='开始', task_def=TaskDefinition(id='t1', name='init', executor_type='script')),
+    StepDefinition(id='s2', name='任务A', task_def=TaskDefinition(id='t2', name='taskA', executor_type='script')),
+    StepDefinition(id='s3', name='任务B', task_def=TaskDefinition(id='t3', name='taskB', executor_type='script')),
+    StepDefinition(id='s4', name='结束', task_def=TaskDefinition(id='t4', name='end', executor_type='script')),
+]
+
+wf_def = WorkflowDefinition(id='dag', name='DAG工作流', steps=steps)
+
+# 定义依赖
+depends_on = {
+    's2': ['s1'],
+    's3': ['s1'],
+    's4': ['s2', 's3']
+}
+
+executor = ParallelExecutor()
+result = executor.execute(wf_def, depends_on_map=depends_on)
+```
+
+### 审批流程
+
+```python
+from workflow_engine.services.approval_service import ApprovalService, NotificationService
+
+notification_svc = NotificationService()
+approval_svc = ApprovalService(notification_svc)
+
+# 创建审批
+approval = approval_svc.create_approval(
+    step_instance_id='step_approval',
+    workflow_instance_id='wf_001',
+    title='请假申请',
+    approver='manager'
+)
+
+# 审批通过
+approval_svc.approve(approval.id, approved_by='manager', comment='同意')
+
+# 审批拒绝
+approval_svc.reject(approval.id, rejected_by='manager', comment='不同意')
+```
+
+### REST API
 
 ```bash
-python -m workflow_engine.cli.main run examples/hello.yaml
+# 启动API服务
+python -m uvicorn api.main:app --port 8000
+
+# 创建工作流定义
+curl -X POST http://localhost:8000/api/v1/workflow-definitions \
+  -H "Content-Type: application/json" \
+  -d '{"name": "测试", "definition_json": {"steps": [{"id": "s1", "name": "第一步"}]}}'
+
+# 启动工作流实例
+curl -X POST http://localhost:8000/api/v1/workflow-instances \
+  -H "Content-Type: application/json" \
+  -d '{"definition_id": "<def_id>", "input_data": {}}'
+
+# 查询指标
+curl http://localhost:8000/api/v1/workflow-instances/metrics
 ```
 
-### 查看状态
+## 核心模块
+
+### 模型
+
+- `models/workflow.py` - 工作流模型
+- `models/condition.py` - 条件模型
+- `models/approval.py` - 审批模型
+
+### 引擎
+
+- `engine/core.py` - 核心引擎
+- `engine/dag.py` - DAG引擎
+- `engine/executor.py` - 并行执行器
+
+### 服务
+
+- `services/approval_service.py` - 审批服务
+- `api/services/workflow_svc.py` - 工作流服务
+
+## 测试
 
 ```bash
-# 列出所有工作流
-python -m workflow_engine.cli.main list
-
-# 查看指定工作流状态
-python -m workflow_engine.cli.main status <workflow_id>
+# 运行集成测试
+python workflow_engine/tests/test_integration.py
 ```
 
-## 项目结构
+## API文档
 
-```
-workflow_engine/
-├── engine/          # 核心引擎
-│   ├── core.py      # 工作流引擎
-│   └── state.py     # 状态管理
-├── models/          # 数据模型
-│   └── workflow.py  # 工作流模型
-├── cli/             # 命令行工具
-│   └── main.py      # CLI入口
-├── examples/        # 示例
-│   └── hello.yaml   # Hello World示例
-└── tests/           # 单元测试
-    └── test_engine.py
-```
-
-## 验收标准
-
-- [x] 能通过CLI成功执行工作流
-- [x] 执行过程中能看到状态变化输出（PENDING → RUNNING → COMPLETED）
-- [x] 3个步骤按顺序执行，无并行
-- [x] 执行完成后能查看结果
-- [x] 单元测试通过
+访问 http://localhost:8000/docs 查看完整API文档

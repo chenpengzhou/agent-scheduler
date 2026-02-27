@@ -112,11 +112,6 @@ class Dispatcher:
         ]
         
         return self.dispatch(task, capable_agents)
-            for a in self.agents_db.values()
-            if capability in a.get("capabilities", [])
-        ]
-        
-        return self.dispatch(task, capable_agents)
 
 
 class LoadBalancer:

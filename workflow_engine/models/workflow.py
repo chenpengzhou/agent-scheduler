@@ -35,6 +35,14 @@ class TaskStatus(Enum):
     FAILED = "FAILED"
 
 
+class StepType(Enum):
+    """步骤类型"""
+    TASK = "task"       # 普通任务
+    APPROVAL = "approval"  # 审批节点
+    CONDITION = "condition"  # 条件分支
+    PARALLEL = "parallel"   # 并行分支
+
+
 @dataclass
 class AgentSelector:
     """Agent选择器"""
@@ -59,8 +67,14 @@ class StepDefinition:
     id: str
     name: str
     description: str = ""
+    step_type: StepType = StepType.TASK  # 步骤类型
     task_def: Optional[TaskDefinition] = None
     next_steps: List[str] = field(default_factory=list)  # 下一步步骤ID列表
+    
+    # 审批相关
+    approver_roles: List[str] = field(default_factory=list)  # 审批人角色
+    approver_users: List[str] = field(default_factory=list)  # 审批人用户
+    approval_timeout: int = 3600  # 审批超时时间(秒)
 
 
 @dataclass

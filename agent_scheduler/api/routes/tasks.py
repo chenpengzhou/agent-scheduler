@@ -124,13 +124,13 @@ async def create_task(task: TaskCreate):
     
     tasks_db[task_id] = task_data
     
-    # 提交到调度引擎
-    from agent_scheduler.models.task import Task as TaskModel
+    # 提交到调度引擎 - 转换为TaskPriority枚举
+    from agent_scheduler.models.task import Task as TaskModel, TaskPriority as TTPriority
     task_model = TaskModel(
         id=task_id,
         name=task.name,
         task_type=task.task_type,
-        priority=task.priority,
+        priority=TTPriority(task.priority),  # 转换为枚举
         depends_on=task.depends_on,
         max_retries=task.max_retries
     )
@@ -285,3 +285,56 @@ async def get_ready_tasks():
     """获取就绪任务列表"""
     ready = scheduler.get_ready_tasks()
     return [to_response(tasks_db[t.id]) for t in ready if t.id in tasks_db]
+
+
+@router.get("/pending-by-priority")
+async def get_pending_tasks_by_priority():
+    """按优先级获取待执行任务"""
+    pending = scheduler.get_pending_tasks_by_priority()
+    return [to_response(tasks_db[t.id]) for t in pending if t.id in tasks_db]
+
+
+@router.post("/{task_id}/dispatch")
+async def dispatch_task(task_id: str, agent_id: str):
+    """手动分发任务给指定Agent"""
+    if task_id not in tasks_db:
+        raise HTTPException(status_code=404, detail="Task not found")
+    
+    task = tasks_db[task_id]
+    
+    if task["status"] != "PENDING":
+        raise HTTPException(status_code=400, detail="Task is not in PENDING status")
+    
+    # 检查Agent是否存在
+    from agent_scheduler.api.routes.agents import agents_db
+    if agent_id not in agents_db:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    
+    agent = agents_db[agent_id]
+    
+    # 检查Agent是否可用
+    if agent.get("status") != "IDLE":
+        raise HTTPException(status_code=400, detail="Agent is not IDLE")
+    
+    # 分配任务
+    task["status"] = "RUNNING"
+    task["assigned_agent_id"] = agent_id
+    task["started_at"] = datetime.now()
+    task["updated_at"] = datetime.now()
+    
+    # 更新Agent状态
+    agent["status"] = "BUSY"
+    agent["current_tasks"] = agent.get("current_tasks", 0) + 1
+    agents_db[agent_id] = agent
+    
+    # 通知调度引擎
+    scheduler.start_task(task_id)
+    
+    return task
+
+
+@router.get("/execution-order")
+async def get_execution_order():
+    """获取任务执行顺序（DAG拓扑排序）"""
+    order = scheduler.dag_scheduler.get_execution_order()
+    return {"batches": order}

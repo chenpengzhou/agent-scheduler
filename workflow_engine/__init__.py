@@ -2,6 +2,7 @@
 工作流引擎 - Workflow Engine
 让工作流能跑起来
 支持DAG和并行执行
+支持审批流程
 """
 
 __version__ = "1.0.0"
@@ -15,11 +16,19 @@ from .models.workflow import (
     StepInstance,
     TaskDefinition,
     TaskInstance,
+    StepType,
 )
 from .engine.core import WorkflowEngine
 from .engine.dag import DAG, DAGExecutor, DAGBuilder
 from .engine.executor import ParallelExecutor
 from .models.condition import Condition, ConditionEvaluator, ExecutionStrategy
+from .models.approval import (
+    ApprovalInstance,
+    ApprovalStatus,
+    ApprovalType,
+    ApprovalDefinition,
+)
+from .services.approval_service import ApprovalService, NotificationService
 
 __all__ = [
     # 模型
@@ -30,6 +39,7 @@ __all__ = [
     "StepInstance",
     "TaskDefinition",
     "TaskInstance",
+    "StepType",
     # 引擎
     "WorkflowEngine",
     "DAG",
@@ -40,4 +50,11 @@ __all__ = [
     "Condition",
     "ConditionEvaluator",
     "ExecutionStrategy",
+    # 审批
+    "ApprovalInstance",
+    "ApprovalStatus",
+    "ApprovalType",
+    "ApprovalDefinition",
+    "ApprovalService",
+    "NotificationService",
 ]

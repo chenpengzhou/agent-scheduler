@@ -1,0 +1,58 @@
+# 审批工作流示例
+name: "审批流程示例"
+version: "1.0"
+description: "展示审批节点的工作流"
+
+steps:
+  - id: "submit"
+    name: "提交申请"
+    step_type: "task"
+    task_def:
+      id: "task1"
+      name: "提交审批申请"
+      executor_type: "script"
+    
+  - id: "approval_step"
+    name: "经理审批"
+    step_type: "approval"
+    approver_roles: ["manager"]
+    approver_users: ["manager_001"]
+    approval_timeout: 3600
+    next_steps:
+      - "approved_path"
+      - "rejected_path"
+    
+  - id: "approved_path"
+    name: "审批通过"
+    step_type: "task"
+    task_def:
+      id: "task2"
+      name: "执行通过逻辑"
+      executor_type: "script"
+    
+  - id: "rejected_path"
+    name: "审批拒绝"
+    step_type: "task"
+    task_def:
+      id: "task3"
+      name: "执行拒绝逻辑"
+      executor_type: "script"
+    
+  - id: "notify"
+    name: "通知结果"
+    step_type: "task"
+    task_def:
+      id: "task4"
+      name: "发送通知"
+      executor_type: "script"
+
+depends_on:
+  approval_step:
+    - submit
+  approved_path:
+    - approval_step
+  rejected_path:
+    - approval_step
+  notify:
+    - approved_path
+    - rejected_path

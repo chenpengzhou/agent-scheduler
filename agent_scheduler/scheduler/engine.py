@@ -1,9 +1,11 @@
 """
 调度引擎 - 任务调度核心
 """
-from typing import List, Dict, Set, Optional, Any
+from typing import List, Dict, Set, Optional, Any, Callable
 from collections import defaultdict, deque
 import logging
+import time
+import threading
 from datetime import datetime
 
 from ..models.task import Task, TaskStatus, TaskPriority
@@ -95,9 +97,14 @@ class DAGScheduler:
             else:
                 in_degree[task_id] = len(task.depends_on)
         
-        # 按优先级初始化
+        # 按优先级初始化 - 处理int或枚举
+        def get_priority_value(t):
+            if hasattr(t, 'value'):
+                return t.value
+            return t
+        
         queue = deque([t for t, d in in_degree.items() if d == 0])
-        queue = deque(sorted(queue, key=lambda x: self.tasks[x].priority.value))
+        queue = deque(sorted(queue, key=lambda x: get_priority_value(self.tasks[x].priority)))
         
         result = []
         
@@ -121,7 +128,7 @@ class DAGScheduler:
                 result.append(batch)
             
             # 按优先级排序下一批次
-            next_queue = deque(sorted(next_queue, key=lambda x: self.tasks[x].priority.value))
+            next_queue = deque(sorted(next_queue, key=lambda x: get_priority_value(self.tasks[x].priority)))
             queue = next_queue
         
         return result
@@ -226,3 +233,151 @@ class SchedulerEngine:
                 stats["cancelled"] += 1
         
         return stats
+    
+    def get_ready_task_ids(self) -> List[str]:
+        """获取就绪任务ID列表"""
+        ready_tasks = self.dag_scheduler.get_ready_tasks()
+        return [t.id for t in ready_tasks]
+    
+    def get_pending_tasks_by_priority(self) -> List[Task]:
+        """按优先级获取待执行任务"""
+        all_tasks = self.get_all_tasks()
+        pending = [t for t in all_tasks if t.status == TaskStatus.PENDING]
+        
+        # 直接使用TaskPriority枚举
+        pending.sort(key=lambda t: t.priority.value if hasattr(t.priority, 'value') else t.priority)
+        return pending
+
+
+class AutoScheduler:
+    """自动调度器 - 自动将任务分发给合适的Agent"""
+    
+    def __init__(self, scheduler_engine: SchedulerEngine, agents_db: Dict[str, Dict] = None):
+        self.scheduler = scheduler_engine
+        self.agents_db = agents_db or {}
+        self.dispatch_callback: Optional[Callable] = None
+        self._running = False
+        self._thread: Optional[threading.Thread] = None
+        self._interval = 5  # 调度间隔（秒）
+    
+    def set_dispatch_callback(self, callback: Callable[[Task, str], None]):
+        """设置任务分发回调"""
+        self.dispatch_callback = callback
+    
+    def start(self):
+        """启动自动调度"""
+        if self._running:
+            return
+        self._running = True
+        self._thread = threading.Thread(target=self._run_loop, daemon=True)
+        self._thread.start()
+        logger.info("Auto scheduler started")
+    
+    def stop(self):
+        """停止自动调度"""
+        self._running = False
+        if self._thread:
+            self._thread.join(timeout=5)
+        logger.info("Auto scheduler stopped")
+    
+    def _run_loop(self):
+        """调度循环"""
+        while self._running:
+            try:
+                self._schedule_next()
+            except Exception as e:
+                logger.error(f"Schedule error: {e}")
+            time.sleep(self._interval)
+    
+    def _schedule_next(self):
+        """调度下一个任务"""
+        # 获取就绪任务
+        ready_tasks = self.scheduler.get_ready_tasks()
+        
+        if not ready_tasks:
+            return
+        
+        # 获取可用Agent
+        available_agents = self._get_available_agents()
+        
+        if not available_agents:
+            return
+        
+        # 按优先级分配任务
+        for task in ready_tasks:
+            agent_id = self._dispatch_task(task, available_agents)
+            if agent_id and self.dispatch_callback:
+                self.dispatch_callback(task, agent_id)
+    
+    def _get_available_agents(self) -> List[Dict]:
+        """获取可用Agent列表"""
+        available = []
+        for agent in self.agents_db.values():
+            status = agent.get("status", "")
+            # 过滤空闲Agent
+            if status in ["IDLE", "Idle"]:
+                # 检查并发限制
+                current_tasks = agent.get("current_tasks", 0)
+                max_tasks = agent.get("max_concurrent_tasks", 1)
+                if current_tasks < max_tasks:
+                    available.append(agent)
+        return available
+    
+    def _dispatch_task(self, task: Task, agents: List[Dict]) -> Optional[str]:
+        """分发任务给Agent"""
+        # 根据任务要求筛选
+        required_capabilities = task.executor_params.get("required_capabilities", [])
+        required_role = task.executor_params.get("required_role", "")
+        
+        suitable = agents
+        
+        # 按能力过滤
+        if required_capabilities:
+            suitable = [
+                a for a in suitable
+                if any(
+                    cap.get("name") in required_capabilities or cap in required_capabilities
+                    for cap in a.get("capabilities", [])
+                )
+            ]
+        
+        # 按角色过滤
+        if required_role:
+            suitable = [a for a in suitable if a.get("role_id") == required_role]
+        
+        if not suitable:
+            return None
+        
+        # 选择负载最低的
+        suitable.sort(key=lambda a: a.get("current_tasks", 0))
+        selected = suitable[0]
+        
+        # 更新Agent负载
+        selected["current_tasks"] = selected.get("current_tasks", 0) + 1
+        
+        return selected.get("id")
+    
+    def manual_dispatch(self, task_id: str, agent_id: str) -> bool:
+        """手动分发任务"""
+        if task_id not in self.scheduler.dag_scheduler.tasks:
+            return False
+        
+        task = self.scheduler.dag_scheduler.tasks[task_id]
+        
+        # 检查Agent是否可用
+        agent = self.agents_db.get(agent_id)
+        if not agent:
+            return False
+        
+        if agent.get("status") != "IDLE":
+            return False
+        
+        # 分配任务
+        task.assigned_agent_id = agent_id
+        self.scheduler.start_task(task_id)
+        
+        # 更新Agent状态
+        agent["current_tasks"] = agent.get("current_tasks", 0) + 1
+        agent["status"] = "BUSY"
+        
+        return True
