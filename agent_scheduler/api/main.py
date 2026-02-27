@@ -5,7 +5,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from datetime import datetime
 
-from agent_scheduler.api.routes import agents, roles, demands, tasks
+from agent_scheduler.api.routes import agents, roles, demands, tasks, pipeline
+from agent_scheduler.api.routes.demands import demands_db
 
 app = FastAPI(
     title="Agent Scheduler API",
@@ -27,6 +28,10 @@ app.include_router(agents.router)
 app.include_router(roles.router)
 app.include_router(demands.router)
 app.include_router(tasks.router)
+app.include_router(pipeline.router)
+
+# 初始化pipeline服务
+pipeline.init_services(demands_db)
 
 
 @app.get("/")
