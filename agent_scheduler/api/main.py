@@ -43,8 +43,9 @@ app.include_router(agent_status.router)
 app.include_router(monitor_extended.router)
 
 # 任务监控路由
-from task_monitor.api.routes import task_monitor
+from task_monitor.api.routes import task_monitor, duration
 app.include_router(task_monitor.router)
+app.include_router(duration.router)
 
 # 初始化服务
 pipeline.init_services()
@@ -55,6 +56,7 @@ queue.init_service(tasks_db, agents_db)
 workflow.init_service(agents_db, tasks_db)
 agent_status.init_service(agents_db)
 task_monitor.init_service(tasks_db)
+duration.init_service(tasks_db)
 
 
 @app.get("/")
