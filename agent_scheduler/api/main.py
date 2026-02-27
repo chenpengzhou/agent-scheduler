@@ -10,6 +10,9 @@ from agent_scheduler.api.routes.demands import demands_db
 from agent_scheduler.api.routes.agents import agents_db
 from agent_scheduler.api.routes.tasks import tasks_db
 
+# 任务监控模块
+from task_monitor.api.routes.task_monitor import router as task_monitor_router
+
 app = FastAPI(
     title="Agent Scheduler API",
     description="Agent调度系统API",
@@ -34,10 +37,15 @@ app.include_router(pipeline.router)
 app.include_router(monitor.router)
 app.include_router(notifications.router)
 
+# 任务监控路由
+from task_monitor.api.routes import task_monitor
+app.include_router(task_monitor.router)
+
 # 初始化服务
 pipeline.init_services()
 monitor.init_services()
 notifications.init_service()
+task_monitor.init_service(tasks_db)
 
 
 @app.get("/")
