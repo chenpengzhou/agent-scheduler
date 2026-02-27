@@ -13,14 +13,17 @@ _pipeline_service = None
 _priority_service = None
 
 
-def init_services(demands_db):
+def init_services(demands_db=None):
     """初始化服务"""
     from agent_scheduler.services.pipeline_service import PipelineService
     from agent_scheduler.services.priority_service import PriorityService
     
+    # 延迟导入获取最新的db引用
+    from agent_scheduler.api.routes.demands import demands_db as demands_db_ref
+    
     global _pipeline_service, _priority_service
-    _pipeline_service = PipelineService(demands_db)
-    _priority_service = PriorityService(demands_db)
+    _pipeline_service = PipelineService(demands_db or demands_db_ref)
+    _priority_service = PriorityService(demands_db or demands_db_ref)
 
 
 # Pydantic模型
