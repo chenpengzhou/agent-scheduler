@@ -64,7 +64,7 @@ async def create_task(task_data: TaskCreate):
     )
     
     queue.create_task(task)
-    execute_task(task, queue)
+    # 只创建任务，不执行，由调度系统巡查触发
     
     return TaskResponse(
         id=task.id,

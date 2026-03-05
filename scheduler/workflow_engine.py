@@ -114,11 +114,26 @@ class WorkflowEngine:
         node_outputs = {}  # 存储节点输出
         
         for node_config in nodes_config:
+            # 确保 depends_on 是列表
+            depends_on_val = node_config.get("depends_on", [])
+            if depends_on_val is None:
+                depends_on_val = []
+            elif isinstance(depends_on_val, str):
+                # 字符串转为列表
+                if depends_on_val.strip():
+                    depends_on_val = [depends_on_val.strip()]
+                else:
+                    depends_on_val = []
+            elif isinstance(depends_on_val, list):
+                pass  # 已经是列表
+            else:
+                depends_on_val = []
+            
             node = WorkflowNode(
                 name=node_config.get("name", ""),
                 agent=node_config.get("agent", ""),
                 message=node_config.get("message", ""),
-                depends_on=node_config.get("depends_on", []),
+                depends_on=depends_on_val,
                 output_format=node_config.get("output_format"),
                 required_fields=node_config.get("required_fields", []),
                 requires_approval=node_config.get("requires_approval", False),

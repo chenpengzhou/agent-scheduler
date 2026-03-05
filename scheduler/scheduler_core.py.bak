@@ -1,0 +1,321 @@
+#!/usr/bin/env python3
+"""
+调度器核心 - Agent 调度器
+基于 APScheduler 实现定时/周期/依赖调度
+"""
+import sys
+import os
+import asyncio
+import requests
+from datetime import datetime
+from typing import Optional, Dict, Any
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
+from apscheduler.triggers.date import DateTrigger
+from croniter import croniter
+
+sys.path.insert(0, "/home/robin/.openclaw/workspace-dev/scheduler")
+from task_queue import queue
+from models import Task, TaskStatus, ScheduleType
+from dag import dag_engine
+
+# 集成心跳和事件发布
+sys.path.insert(0, "/home/robin/.openclaw/workspace-dev")
+try:
+    from agent.heartbeat_reporter import report_status, get_reporter
+    from agent.event_publisher import publish_task_changed, get_publisher
+    _INTEGRATION_ENABLED = True
+except ImportError as e:
+    _INTEGRATION_ENABLED = False
+    print(f"⚠️ 集成模块导入失败: {e}")
+
+
+# Agent 通信配置
+AGENT_API_BASE = "http://localhost:18999/api/v1"
+
+
+class SchedulerCore:
+    """调度器核心"""
+    
+    def __init__(self):
+        self.scheduler = BackgroundScheduler()
+        self.queue = queue
+        self.dag_engine = dag_engine
+        self._running = False  # 运行标志位
+    
+    def start(self):
+        """启动调度器"""
+        if not self.scheduler.running:
+            self.scheduler.start()
+            self._running = True
+            # 启动事件发布器
+            if _INTEGRATION_ENABLED:
+                try:
+                    get_publisher().start()
+                    print("✅ 事件发布器已启动")
+                except Exception as e:
+                    print(f"⚠️ 事件发布器启动失败: {e}")
+            # 添加定时检查超时任务
+            self.scheduler.add_job(
+                self._check_agent_timeout,
+                IntervalTrigger(seconds=30),
+                id="check_timeout"
+            )
+            print("✅ 调度器已启动")
+    
+    def stop(self):
+        """停止调度器"""
+        self._running = False
+        if self.scheduler.running:
+            self.scheduler.shutdown()
+            print("⏹️ 调度器已停止")
+    
+    def add_immediate_task(self, task: Task) -> bool:
+        """添加立即执行任务"""
+        task.schedule_type = ScheduleType.IMMEDIATE
+        self.queue.create_task(task)
+        return True
+    
+    def add_scheduled_task(self, task: Task, run_date: datetime) -> bool:
+        """添加定时任务"""
+        task.schedule_type = ScheduleType.CRON
+        task.scheduled_at = run_date
+        self.queue.create_task(task)
+        
+        self.scheduler.add_job(
+            self._execute_task,
+            DateTrigger(run_date=run_date),
+            args=[task.id],
+            id=f"task_{task.id}"
+        )
+        return True
+    
+    def add_cron_task(self, task: Task, cron_expr: str) -> bool:
+        """添加 Cron 任务"""
+        task.schedule_type = ScheduleType.CRON
+        task.cron_expr = cron_expr
+        self.queue.create_task(task)
+        
+        # 解析 Cron 表达式
+        trigger = CronTrigger.from_crontab(cron_expr)
+        self.scheduler.add_job(
+            self._execute_task,
+            trigger,
+            args=[task.id],
+            id=f"task_{task.id}"
+        )
+        return True
+    
+    def add_interval_task(self, task: Task, interval_seconds: int) -> bool:
+        """添加周期任务"""
+        task.schedule_type = ScheduleType.CRON
+        self.queue.create_task(task)
+        
+        self.scheduler.add_job(
+            self._execute_task,
+            IntervalTrigger(seconds=interval_seconds),
+            args=[task.id],
+            id=f"task_{task.id}"
+        )
+        return True
+    
+    def add_dag_task(self, task: Task, workflow_id: str) -> bool:
+        """添加 DAG 任务"""
+        task.schedule_type = ScheduleType.DAG
+        self.queue.create_task(task)
+        return True
+    
+    def cancel_task(self, task_id: str) -> bool:
+        """取消任务"""
+        try:
+            self.scheduler.remove_job(f"task_{task_id}")
+        except Exception:
+            pass
+        self.queue.delete_task(task_id)
+        return True
+    
+    def _dispatch_to_agent(self, task: Task) -> bool:
+        """分发任务给 Agent"""
+        agent_id = task.agent_id
+        
+        # 尝试调用 Agent API
+        try:
+            # 方式1: 通过 OpenClaw Gateway 发送消息
+            response = requests.post(
+                f"{AGENT_API_BASE}/agent/message",
+                json={
+                    "agent_id": agent_id,
+                    "message": f"收到新任务: {task.name}",
+                    "payload": task.payload
+                },
+                timeout=5
+            )
+            if response.status_code == 200:
+                print(f"✅ 任务 {task.id} 已分发给 Agent {agent_id}")
+                return True
+        except Exception as e:
+            print(f"⚠️ Agent API 调用失败: {e}")
+        
+        # 方式2: 通过 Redis 消息队列（备用）
+        try:
+            queue.redis.lpush(f"agent:{agent_id}:tasks", task.id)
+            print(f"✅ 任务 {task.id} 已推入 Redis 队列 agent:{agent_id}:tasks")
+            return True
+        except Exception as e:
+            print(f"❌ 任务分发失败: {e}")
+            return False
+    
+    def _execute_task(self, task_id: str) -> bool:
+        """执行任务"""
+        task = self.queue.get_task(task_id)
+        if not task:
+            return False
+        
+        # 检查依赖
+        if task.depends_on:
+            for dep_id in task.depends_on:
+                dep_task = self.queue.get_task(dep_id)
+                if dep_task and dep_task.status != TaskStatus.COMPLETED:
+                    # 依赖未满足，延迟执行
+                    return False
+        
+        # 移动到运行队列
+        self.queue.move_to_running(task_id)
+        
+        # 更新任务状态
+        task.status = TaskStatus.RUNNING
+        task.started_at = datetime.now()
+        self.queue.update_task(task)
+        
+        # 分发给 Agent
+        self._dispatch_to_agent(task)
+        
+        # === 集成：状态变更上报 ===
+        if _INTEGRATION_ENABLED:
+            try:
+                # 上报心跳：Agent忙碌
+                report_status("busy", task.name)
+                # 发布任务变更事件
+                publish_task_changed(task.id, "running", task.agent_id, task_name=task.name)
+            except Exception as e:
+                print(f"⚠️ 状态上报失败: {e}")
+        
+        return True
+    
+    def complete_task(self, task_id: str, result: Dict[str, Any]) -> bool:
+        """完成任务"""
+        task = self.queue.get_task(task_id)
+        if not task:
+            return False
+        
+        task.status = TaskStatus.COMPLETED
+        task.result = result
+        task.completed_at = datetime.now()
+        self.queue.update_task(task)
+        self.queue.move_to_completed(task_id)
+        
+        # === 集成：状态变更上报 ===
+        if _INTEGRATION_ENABLED:
+            try:
+                # 上报心跳：Agent空闲
+                report_status("idle")
+                # 发布任务完成事件
+                publish_task_changed(task.id, "completed", task.agent_id, result=result)
+            except Exception as e:
+                print(f"⚠️ 状态上报失败: {e}")
+        
+        # 如果是 DAG 任务，更新 DAG 状态
+        if task.schedule_type == ScheduleType.DAG:
+            # 查找工作流
+            # TODO: 实现工作流更新
+            pass
+        
+        return True
+    
+    def fail_task(self, task_id: str, error: str) -> bool:
+        """任务失败"""
+        task = self.queue.get_task(task_id)
+        if not task:
+            return False
+        
+        # 检查重试
+        if task.retry_count < task.retry:
+            task.retry_count += 1
+            task.status = TaskStatus.PENDING
+            self.queue.update_task(task)
+            self.queue.redis.rpush(self.queue.pending_queue, task_id)
+        else:
+            task.status = TaskStatus.FAILED
+            task.error = error
+            task.completed_at = datetime.now()
+            self.queue.update_task(task)
+            self.queue.move_to_failed(task_id)
+        
+        # === 集成：状态变更上报 ===
+        if _INTEGRATION_ENABLED:
+            try:
+                # 上报心跳：Agent空闲
+                report_status("idle")
+                # 发布任务失败事件
+                publish_task_changed(task.id, "failed", task.agent_id, error=error)
+            except Exception as e:
+                print(f"⚠️ 状态上报失败: {e}")
+        
+        return True
+    
+    def process_pending_queue(self):
+        """处理待执行队列"""
+        while self._running:
+            task_id = self.queue.pop_pending_task()
+            if not task_id:
+                break
+            self._execute_task(task_id)
+    
+    def _check_agent_timeout(self):
+        """检查 Agent 超时"""
+        try:
+            from heartbeat import heartbeat_manager
+            timeout_agents = heartbeat_manager.check_timeout()
+            if timeout_agents:
+                print(f"⚠️ {len(timeout_agents)} 个 Agent 超时: {timeout_agents}")
+        except Exception as e:
+            print(f"检查 Agent 超时失败: {e}")
+    
+    def sync_crontab(self):
+        """同步 Cron 任务"""
+        crontab_tasks = self.queue.get_crontab_tasks()
+        for ct in crontab_tasks:
+            if ct.get("enabled"):
+                task = self.queue.get_task(ct["task_id"])
+                if task:
+                    # 检查是否应该执行
+                    if self._should_run_cron(ct["cron_expr"]):
+                        self._execute_task(task.id)
+    
+    def _should_run_cron(self, cron_expr: str) -> bool:
+        """检查 Cron 表达式是否应该现在执行"""
+        try:
+            cron = croniter(cron_expr)
+            now = datetime.now()
+            prev = cron.get_prev(datetime)
+            next_run = cron.get_next(datetime)
+            
+            # 如果上一次执行在过去1分钟内
+            return (now - prev).total_seconds() < 60
+        except Exception:
+            return False
+    
+    def get_jobs(self) -> Dict[str, Any]:
+        """获取所有调度任务"""
+        jobs = []
+        for job in self.scheduler.get_jobs():
+            jobs.append({
+                "id": job.id,
+                "next_run_time": str(job.next_run_time) if job.next_run_time else None
+            })
+        return {"jobs": jobs}
+
+
+# 全局实例
+scheduler_core = SchedulerCore()

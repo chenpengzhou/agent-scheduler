@@ -49,7 +49,7 @@ class Task(BaseModel):
     created_by: Optional[str] = ""
     
     # Agent输出
-    output: Optional[Dict[str, Any]] = None
+    output: Optional[Dict[str, Any] | str] = None
     output_format: Optional[str] = None  # json/text/plain
     required_fields: List[str] = Field(default_factory=list)
     
@@ -130,7 +130,7 @@ class NodeExecution(BaseModel):
     
     # 消息和输出
     message: str = ""
-    output: Optional[Dict[str, Any]] = None
+    output: Optional[Dict[str, Any] | str] = None
     output_format: Optional[str] = None
     required_fields: List[str] = Field(default_factory=list)
     
