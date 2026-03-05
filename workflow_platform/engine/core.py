@@ -17,6 +17,7 @@ from ..models.workflow import (
     TaskStatus,
 )
 from .state import StateManager, InMemoryStateManager
+from .redis_state import RedisStateManager
 
 
 logger = logging.getLogger(__name__)
@@ -25,8 +26,35 @@ logger = logging.getLogger(__name__)
 class WorkflowEngine:
     """工作流引擎"""
     
-    def __init__(self, state_manager: Optional[StateManager] = None):
-        self.state_manager = state_manager or InMemoryStateManager()
+    def __init__(
+        self, 
+        state_manager: Optional[StateManager] = None,
+        use_redis: bool = False,
+        redis_host: str = "localhost",
+        redis_port: int = 6379,
+        redis_db: int = 1
+    ):
+        """
+        初始化工作流引擎
+        
+        Args:
+            state_manager: 状态管理器（传入时优先使用）
+            use_redis: 是否使用 Redis 状态管理器
+            redis_host: Redis 主机地址
+            redis_port: Redis 端口
+            redis_db: Redis 数据库编号
+        """
+        if state_manager:
+            self.state_manager = state_manager
+        elif use_redis:
+            self.state_manager = RedisStateManager(
+                host=redis_host,
+                port=redis_port,
+                db=redis_db
+            )
+        else:
+            self.state_manager = InMemoryStateManager()
+        
         self.task_executors: Dict[str, Callable] = {}
         
         # 注册默认的执行器
@@ -153,6 +181,9 @@ class WorkflowEngine:
                 workflow_instance.state.update(step_instance.output_data)
                 workflow_instance.completed_steps.append(step_def.id)
                 
+                # 更新 Redis 节点状态（供调度系统查询下游触发）
+                self._update_node_status(workflow_instance.id, step_def.name, "COMPLETED")
+                
                 print(f"   Status: COMPLETED")
             
         except Exception as e:
@@ -161,6 +192,10 @@ class WorkflowEngine:
             step_instance.completed_at = datetime.now()
             workflow_instance.status = WorkflowStatus.FAILED
             workflow_instance.error_message = str(e)
+            
+            # 更新 Redis 节点状态（失败）
+            self._update_node_status(workflow_instance.id, step_def.name, "FAILED")
+            
             print(f"   Status: FAILED: {e}")
             logger.exception(f"[Step {step_def.id}] Failed: {e}")
         
@@ -260,6 +295,15 @@ class WorkflowEngine:
         """执行函数任务"""
         print(f"      🔧 Function: {task_def.name}")
         return {"result": "Function executed"}
+    
+    def _update_node_status(self, workflow_id: str, node_name: str, status: str):
+        """更新节点状态到 Redis（供调度系统查询下游触发）"""
+        if hasattr(self.state_manager, 'set_node_status'):
+            try:
+                self.state_manager.set_node_status(workflow_id, node_name, status)
+                logger.info(f"[Workflow {workflow_id}] Node {node_name} status: {status}")
+            except Exception as e:
+                logger.warning(f"[Workflow {workflow_id}] Failed to update node status: {e}")
     
     def _get_next_step(
         self, 

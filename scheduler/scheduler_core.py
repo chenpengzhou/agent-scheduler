@@ -15,6 +15,7 @@ from typing import Optional, Dict, Any, Tuple
 sys.path.insert(0, "/home/robin/.openclaw/workspace-dev/scheduler")
 from models import Task, TaskStatus, AgentConfig
 from task_queue import RedisQueue
+from workflow_engine import workflow_engine
 
 
 # Agent配置（从配置文件或数据库加载）

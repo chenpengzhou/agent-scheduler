@@ -214,7 +214,8 @@ class WorkflowEngine:
             agent_id=execution.agent_id,
             message=execution.message,
             output_format=execution.output_format,
-            required_fields=execution.required_fields
+            required_fields=execution.required_fields,
+            depends_on=execution.depends_on
         )
         
         queue = RedisQueue()
