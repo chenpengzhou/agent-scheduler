@@ -303,9 +303,14 @@ class WorkflowEngine:
     
     def start_instance(self, template_id: str, trigger_input: Dict[str, Any]) -> Optional[WorkflowInstance]:
         """启动实例"""
+        print(f"🔄 [工作流] 启动实例，模板ID: {template_id}")
+        
         template = self.get_template(template_id)
         if not template:
+            print(f"❌ [工作流] 模板不存在: {template_id}")
             return None
+        
+        print(f"📋 [工作流] 模板: {template.name}")
         
         # 解析YAML
         config = self.parse_yaml(template.yaml_content)
@@ -322,8 +327,11 @@ class WorkflowEngine:
         # 持久化到 Redis
         self._save_instance(instance)
         
+        print(f"✅ [工作流] 实例已创建: {instance.id}")
+        
         # 解析节点并创建执行
         nodes_config = config.get("nodes", [])
+        print(f"📝 [工作流] 节点数量: {len(nodes_config)}")
         node_outputs = {}  # 存储节点输出
         
         for node_config in nodes_config:
