@@ -134,6 +134,14 @@ Agent: {task.agent_id}
 
 def execute_task_async(task: Task, queue: RedisQueue):
     """异步执行任务"""
+    # 导入工作流引擎（延迟导入避免循环依赖）
+    workflow_engine = None
+    try:
+        from workflow_engine import workflow_engine as we
+        workflow_engine = we
+    except ImportError:
+        print("⚠️ 工作流引擎未加载，跳过节点完成通知")
+    
     try:
         # 更新状态为running
         task.status = TaskStatus.RUNNING
@@ -181,6 +189,13 @@ def execute_task_async(task: Task, queue: RedisQueue):
                 print(f"✅ 任务完成: {task.name}")
                 # 任务完成后移动到completed队列
                 queue.move_to_completed(task.id)
+                # 通知工作流引擎节点完成
+                if workflow_engine:
+                    try:
+                        workflow_engine.check_node_completion(task.id, task.output or {})
+                        print(f"   → 已通知工作流引擎")
+                    except Exception as e:
+                        print(f"   ⚠️ 工作流引擎通知失败: {e}")
                 # 触发下游节点
                 _trigger_downstream(task, queue)
             else:
