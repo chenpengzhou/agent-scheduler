@@ -91,11 +91,25 @@ def process_task(task_id: str) -> bool:
     
     # 1. pending -> A2A 调用 Agent
     if status == "pending":
+        # 防重复调度：检查是否有 pending/running 的同一任务（通过name或chain_id判断）
+        chain_id = task.chain_id
+        if chain_id:
+            # 获取所有 pending/running 任务，检查是否有同链ID的任务已在运行
+            running_tasks = queue.redis.lrange(queue.running_queue, 0, -1)
+            for running_id in running_tasks:
+                running_task = queue.get_task(running_id)
+                if running_task and running_task.chain_id == chain_id and running_task.id != task_id:
+                    print(f"   ⏭️ 跳过：同链任务 {running_task.name} 正在运行")
+                    # 移出 pending 队列，避免重复调度
+                    queue.redis.lrem(queue.pending_queue, 0, task_id)
+                    return False
+        
         task_dict = {
             "id": task.id,
             "name": task.name,
             "agent_id": agent_id,
-            "created_by": created_by
+            "created_by": created_by,
+            "chain_id": chain_id
         }
         send_to_agent(agent_id, task_dict)
         
@@ -105,7 +119,45 @@ def process_task(task_id: str) -> bool:
         print(f"   → 已更新状态为 running")
         return True
     
+    # 2. completed -> 触发下游节点
+    elif status == "completed":
+        print(f"   ✅ 任务完成: {task.name}")
+        # 触发下游节点
+        trigger_downstream(task, queue)
+        return True
+    
     return False
+
+
+def trigger_downstream(task, queue: RedisQueue):
+    """触发下游依赖任务"""
+    # 获取所有 pending 任务，检查是否有依赖当前任务的任务
+    pending_task_ids = queue.redis.lrange(queue.pending_queue, 0, -1)
+    
+    triggered = []
+    for downstream_id in pending_task_ids:
+        downstream = queue.get_task(downstream_id)
+        if downstream and downstream.depends_on:
+            # 检查当前任务是否在依赖列表中
+            if task.id in downstream.depends_on or task.name in downstream.depends_on:
+                # 检查是否所有依赖都已完成
+                all_deps_met = True
+                for dep_id in downstream.depends_on:
+                    dep_task = queue.get_task(dep_id)
+                    if dep_task and dep_task.status != TaskStatus.COMPLETED:
+                        all_deps_met = False
+                        break
+                
+                if all_deps_met:
+                    # 移除依赖标记，触发任务
+                    downstream.depends_on = []
+                    downstream.chain_id = task.chain_id  # 继承链ID
+                    queue.update_task(downstream)
+                    triggered.append(downstream.name)
+                    print(f"   → 触发下游任务: {downstream.name}")
+    
+    if triggered:
+        print(f"   ✅ 已触发 {len(triggered)} 个下游任务")
 
 
 def run_scheduler():

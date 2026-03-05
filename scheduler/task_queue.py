@@ -93,11 +93,16 @@ class RedisQueue:
             
             # 根据调度类型处理
             if task.schedule_type == ScheduleType.IMMEDIATE:
-                # 检查任务是否已在 pending 或 running 队列中，避免重复添加
-                pending_tasks = self.redis.lrange(self.pending_queue, 0, -1)
-                running_tasks = self.redis.lrange(self.running_queue, 0, -1)
+                # 检查任务是否已在任意队列中，避免重复添加
+                all_queues = [
+                    self.redis.lrange(self.pending_queue, 0, -1),
+                    self.redis.lrange(self.running_queue, 0, -1),
+                    self.redis.lrange(self.completed_queue, 0, -1),
+                    self.redis.lrange(self.failed_queue, 0, -1)
+                ]
+                in_queue = any(task.id in queue for queue in all_queues)
                 
-                if task.id not in pending_tasks and task.id not in running_tasks:
+                if not in_queue:
                     # 任务不在队列中，加入 pending 队列
                     self.redis.rpush(self.pending_queue, task.id)
             elif task.schedule_type == ScheduleType.CRON:

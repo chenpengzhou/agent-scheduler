@@ -179,6 +179,10 @@ def execute_task_async(task: Task, queue: RedisQueue):
                 task.status = TaskStatus.COMPLETED
                 task.completed_at = datetime.now()
                 print(f"✅ 任务完成: {task.name}")
+                # 任务完成后移动到completed队列
+                queue.move_to_completed(task.id)
+                # 触发下游节点
+                _trigger_downstream(task, queue)
             else:
                 # 输出验证失败，检查重试
                 if task.retry_count < task.max_retries:
@@ -245,3 +249,40 @@ def retry_task(task_id: str, queue: RedisQueue) -> bool:
     
     execute_task(task, queue)
     return True
+
+
+def _trigger_downstream(task: Task, queue: RedisQueue):
+    """触发下游依赖任务"""
+    # 获取所有 pending 任务，检查是否有依赖当前任务的任务
+    try:
+        pending_task_ids = queue.redis.lrange(queue.pending_queue, 0, -1)
+        
+        triggered = []
+        for downstream_id in pending_task_ids:
+            downstream = queue.get_task(downstream_id)
+            if downstream and downstream.depends_on:
+                # 检查当前任务是否在依赖列表中
+                deps_met = True
+                for dep_id in downstream.depends_on:
+                    # 支持task id或task name作为依赖
+                    if dep_id != task.id and dep_id != task.name:
+                        continue
+                    # 检查该依赖是否已完成
+                    dep_task = queue.get_task(dep_id)
+                    if dep_task and dep_task.status != TaskStatus.COMPLETED:
+                        deps_met = False
+                        break
+                
+                if deps_met:
+                    # 移除该依赖
+                    downstream.depends_on = [d for d in downstream.depends_on 
+                                            if d != task.id and d != task.name]
+                    downstream.chain_id = task.chain_id  # 继承链ID
+                    queue.update_task(downstream)
+                    triggered.append(downstream.name)
+                    print(f"   → 触发下游任务: {downstream.name}")
+        
+        if triggered:
+            print(f"   ✅ 已触发 {len(triggered)} 个下游任务")
+    except Exception as e:
+        print(f"   ⚠️ 触发下游任务失败: {e}")
