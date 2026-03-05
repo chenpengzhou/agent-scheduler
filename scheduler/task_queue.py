@@ -85,6 +85,10 @@ class RedisQueue:
             if "required_fields" in task_data and isinstance(task_data["required_fields"], list):
                 task_data["required_fields"] = json.dumps(task_data["required_fields"])
             
+            # 将 bool 类型转为 int 存储（Redis 不支持 bool）
+            if "downstream_triggered" in task_data:
+                task_data["downstream_triggered"] = int(task_data["downstream_triggered"])
+            
             # 过滤掉 None 值（Redis hset 不支持）
             task_data = {k: v for k, v in task_data.items() if v is not None}
             
@@ -141,6 +145,10 @@ class RedisQueue:
                 task_data["depends_on"] = json.loads(task_data["depends_on"])
             if "required_fields" in task_data and task_data["required_fields"]:
                 task_data["required_fields"] = json.loads(task_data["required_fields"])
+            
+            # 将 int 转换回 bool（Redis 存储时将 bool 转为 int）
+            if "downstream_triggered" in task_data:
+                task_data["downstream_triggered"] = bool(int(task_data["downstream_triggered"]))
             
             # 转换枚举
             task_data["status"] = TaskStatus(task_data["status"])

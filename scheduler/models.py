@@ -53,8 +53,13 @@ class Task(BaseModel):
     output_format: Optional[str] = None  # json/text/plain
     required_fields: List[str] = Field(default_factory=list)
     
-    # 状态
+    # 状态：pending → running → completed/failed
     status: TaskStatus = TaskStatus.PENDING
+    
+    # 下游触发标记
+    downstream_triggered: bool = False  # 是否已触发下游节点
+    
+    # 执行结果
     result: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
     error_message: Optional[str] = None

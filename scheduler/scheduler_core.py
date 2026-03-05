@@ -253,6 +253,15 @@ def retry_task(task_id: str, queue: RedisQueue) -> bool:
 
 def _trigger_downstream(task: Task, queue: RedisQueue):
     """触发下游依赖任务"""
+    # 如果已经触发过下游，不再重复触发
+    if getattr(task, 'downstream_triggered', False):
+        print(f"   ⏭️ 下游已触发，跳过: {task.name}")
+        return
+    
+    # 标记已触发下游
+    task.downstream_triggered = True
+    queue.update_task(task)
+    
     # 获取所有 pending 任务，检查是否有依赖当前任务的任务
     try:
         pending_task_ids = queue.redis.lrange(queue.pending_queue, 0, -1)

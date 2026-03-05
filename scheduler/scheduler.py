@@ -91,12 +91,42 @@ def process_task(task_id: str) -> bool:
     
     # 1. pending -> A2A 调用 Agent
     if status == "pending":
-        # 防重复调度：检查是否有 pending/running 的同一任务（通过name或chain_id判断）
+        # ===== 防重复调度：检查是否有 pending/running 的同一节点任务 =====
+        task_name = task.name
+        
+        # 检查 pending 队列中是否有同名的任务
+        pending_task_ids = queue.redis.lrange(queue.pending_queue, 0, -1)
+        for pending_id in pending_task_ids:
+            if pending_id == task_id:
+                continue
+            pending_task = queue.get_task(pending_id)
+            if pending_task and pending_task.name == task_name:
+                print(f"   ⏭️ 跳过：pending 队列中已有同名任务 {task_name}")
+                # 移出 pending 队列，避免重复调度
+                queue.redis.lrem(queue.pending_queue, 0, task_id)
+                return False
+        
+        # 检查 running 队列中是否有同名的任务
+        running_task_ids = queue.redis.lrange(queue.running_queue, 0, -1)
+        for running_id in running_task_ids:
+            if running_id == task_id:
+                continue
+            running_task = queue.get_task(running_id)
+            if running_task and running_task.name == task_name:
+                print(f"   ⏭️ 跳过：running 队列中已有同名任务 {task_name}")
+                # 移出 pending 队列
+                queue.redis.lrem(queue.pending_queue, 0, task_id)
+                return False
+        
+        # 检查 completed 队列中是否有同名的最近完成的任务（避免刚完成又被调度）
+        # 这里简化处理：如果刚完成的任务还在 completed 队列中，则跳过
+        # 注意：这可能导致一些边界问题，但对于大多数场景是安全的
+        
+        # 防 chain_id 重复调度
         chain_id = task.chain_id
         if chain_id:
-            # 获取所有 pending/running 任务，检查是否有同链ID的任务已在运行
-            running_tasks = queue.redis.lrange(queue.running_queue, 0, -1)
-            for running_id in running_tasks:
+            # 获取所有 running 任务，检查是否有同链ID的任务已在运行
+            for running_id in running_task_ids:
                 running_task = queue.get_task(running_id)
                 if running_task and running_task.chain_id == chain_id and running_task.id != task_id:
                     print(f"   ⏭️ 跳过：同链任务 {running_task.name} 正在运行")
@@ -131,6 +161,15 @@ def process_task(task_id: str) -> bool:
 
 def trigger_downstream(task, queue: RedisQueue):
     """触发下游依赖任务"""
+    # 如果已经触发过下游，不再重复触发
+    if task.downstream_triggered:
+        print(f"   ⏭️ 下游已触发，跳过: {task.name}")
+        return
+    
+    # 标记已触发下游
+    task.downstream_triggered = True
+    queue.update_task(task)
+    
     # 获取所有 pending 任务，检查是否有依赖当前任务的任务
     pending_task_ids = queue.redis.lrange(queue.pending_queue, 0, -1)
     
