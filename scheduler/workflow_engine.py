@@ -12,6 +12,10 @@ import redis
 from datetime import datetime
 from typing import Optional, Dict, Any, List
 from pathlib import Path
+import logging
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("workflow_engine")
 
 sys.path.insert(0, "/home/robin/.openclaw/workspace-dev/scheduler")
 from models import (
@@ -21,16 +25,14 @@ from models import (
 
 
 class WorkflowEngine:
-    """工作流引擎"""
+    """工作流引擎 - 支持多进程共享"""
     
     def __init__(self, redis_host: str = "localhost", redis_port: int = 6379, redis_db: int = 0):
-        # Redis 连接
-        self.redis = redis.Redis(
-            host=redis_host,
-            port=redis_port,
-            db=redis_db,
-            decode_responses=True
-        )
+        # Redis 连接（带重试）
+        self._redis_host = redis_host
+        self._redis_port = redis_port
+        self._redis_db = redis_db
+        self._connect_redis()
         self._prefix = "workflow"
         
         # 内存缓存（从 Redis 加载）
@@ -38,7 +40,34 @@ class WorkflowEngine:
         self.instances: Dict[str, WorkflowInstance] = {}
         self.node_executions: Dict[str, NodeExecution] = {}
         
-        # 从 Redis 加载数据
+        # 强制从 Redis 加载数据
+        self._load_from_redis()
+        logger.info(f"WorkflowEngine 初始化完成: {len(self.templates)} 模板, {len(self.instances)} 实例, {len(self.node_executions)} 执行")
+    
+    def _connect_redis(self):
+        """连接 Redis，带重试机制"""
+        for attempt in range(3):
+            try:
+                self.redis = redis.Redis(
+                    host=self._redis_host,
+                    port=self._redis_port,
+                    db=self._redis_db,
+                    decode_responses=True,
+                    socket_connect_timeout=5,
+                    socket_timeout=5
+                )
+                self.redis.ping()
+                logger.info(f"Redis 连接成功: {self._redis_host}:{self._redis_port}")
+                return
+            except Exception as e:
+                logger.warning(f"Redis 连接失败 (尝试 {attempt+1}/3): {e}")
+                if attempt == 2:
+                    raise RuntimeError(f"无法连接 Redis: {e}")
+                import time
+                time.sleep(1)
+    
+    def reload(self):
+        """强制从 Redis 重新加载所有数据"""
         self._load_from_redis()
     
     # ========== Redis Key 定义 ==========
@@ -67,8 +96,12 @@ class WorkflowEngine:
     def _load_from_redis(self):
         """从 Redis 加载数据"""
         try:
+            # 重新连接 Redis（确保连接有效）
+            self._connect_redis()
+            
             # 加载模板
             template_ids = self.redis.smembers(self._template_ids_key) or set()
+            logger.info(f"从 Redis 加载 {len(template_ids)} 个模板...")
             for template_id in template_ids:
                 template_data = self.redis.hgetall(self._template_key(template_id))
                 if template_data:
@@ -76,6 +109,7 @@ class WorkflowEngine:
             
             # 加载实例
             instance_ids = self.redis.smembers(self._instance_ids_key) or set()
+            logger.info(f"从 Redis 加载 {len(instance_ids)} 个实例...")
             for instance_id in instance_ids:
                 instance_data = self.redis.hgetall(self._instance_key(instance_id))
                 if instance_data:
@@ -83,18 +117,22 @@ class WorkflowEngine:
             
             # 加载节点执行
             execution_ids = self.redis.smembers(self._execution_ids_key) or set()
+            logger.info(f"从 Redis 加载 {len(execution_ids)} 个执行...")
             for execution_id in execution_ids:
                 execution_data = self.redis.hgetall(self._execution_key(execution_id))
                 if execution_data:
                     self._restore_execution(execution_data)
             
-            print(f"✅ 从 Redis 加载: {len(self.templates)} 模板, {len(self.instances)} 实例, {len(self.node_executions)} 执行")
+            logger.info(f"✅ 从 Redis 加载完成: {len(self.templates)} 模板, {len(self.instances)} 实例, {len(self.node_executions)} 执行")
         except Exception as e:
-            print(f"⚠️ Redis 加载失败: {e}")
+            logger.error(f"❌ Redis 加载失败: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
     
     def _save_template(self, template: WorkflowTemplate):
         """保存模板到 Redis"""
         try:
+            self._connect_redis()  # 确保连接有效
             data = template.model_dump()
             data["created_at"] = template.created_at.isoformat()
             data["updated_at"] = template.updated_at.isoformat()
@@ -102,12 +140,16 @@ class WorkflowEngine:
             
             self.redis.hset(self._template_key(template.id), mapping=data)
             self.redis.sadd(self._template_ids_key, template.id)
+            logger.info(f"✅ 保存模板到 Redis: {template.id}")
         except Exception as e:
-            print(f"❌ 保存模板失败: {e}")
+            logger.error(f"❌ 保存模板失败: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
     
     def _save_instance(self, instance: WorkflowInstance):
         """保存实例到 Redis"""
         try:
+            self._connect_redis()  # 确保连接有效
             data = instance.model_dump()
             data["created_at"] = instance.created_at.isoformat()
             if instance.started_at:
@@ -118,12 +160,16 @@ class WorkflowEngine:
             
             self.redis.hset(self._instance_key(instance.id), mapping=data)
             self.redis.sadd(self._instance_ids_key, instance.id)
+            logger.info(f"✅ 保存实例到 Redis: {instance.id}")
         except Exception as e:
-            print(f"❌ 保存实例失败: {e}")
+            logger.error(f"❌ 保存实例失败: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
     
     def _save_execution(self, execution: NodeExecution):
         """保存节点执行到 Redis"""
         try:
+            self._connect_redis()  # 确保连接有效
             data = execution.model_dump()
             data["created_at"] = execution.created_at.isoformat()
             if execution.started_at:
@@ -142,8 +188,11 @@ class WorkflowEngine:
             
             self.redis.hset(self._execution_key(execution.id), mapping=data)
             self.redis.sadd(self._execution_ids_key, execution.id)
+            logger.info(f"✅ 保存执行到 Redis: {execution.id} (node: {execution.node_name})")
         except Exception as e:
-            print(f"❌ 保存执行失败: {e}")
+            logger.error(f"❌ 保存执行失败: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
     
     def _restore_template(self, data: dict):
         """从数据恢复模板"""
@@ -330,33 +379,42 @@ class WorkflowEngine:
         """触发就绪的节点"""
         instance = self.instances.get(instance_id)
         if not instance:
+            logger.warning(f"_trigger_ready_nodes: 实例不存在 {instance_id}")
             return
         
         # 获取所有节点执行
         executions = [e for e in self.node_executions.values() 
                     if e.instance_id == instance_id]
         
+        logger.info(f"_trigger_ready_nodes: instance_id={instance_id}, pending nodes={len([e for e in executions if e.status == NodeStatus.PENDING])}")
+        
         for execution in executions:
             if execution.status != NodeStatus.PENDING:
                 continue
+            
+            logger.info(f"   检查节点: {execution.node_name}, 依赖: {execution.depends_on}")
             
             # 检查依赖是否完成
             deps_completed = True
             for dep_name in execution.depends_on:
                 dep_exec = self._find_execution(instance_id, dep_name)
+                logger.info(f"      依赖 {dep_name}: {dep_exec}")
                 if not dep_exec or dep_exec.status != NodeStatus.COMPLETED:
                     deps_completed = False
                     break
             
             if deps_completed:
                 # 触发执行
+                logger.info(f"   ✅ 依赖满足，触发节点: {execution.node_name}")
                 self._execute_node(execution)
     
     def _find_execution(self, instance_id: str, node_name: str) -> Optional[NodeExecution]:
         """查找节点执行"""
         for e in self.node_executions.values():
             if e.instance_id == instance_id and e.node_name == node_name:
+                logger.info(f"_find_execution: 查找 {node_name}, 结果={e.id}, status={e.status}")
                 return e
+        logger.warning(f"_find_execution: 未找到节点 {node_name}")
         return None
     
     def _execute_node(self, execution: NodeExecution):
@@ -397,9 +455,18 @@ class WorkflowEngine:
     
     def check_node_completion(self, task_id: str, output: Dict[str, Any]):
         """检查节点完成"""
+        logger.info(f"🔔 check_node_completion 被调用: task_id={task_id}")
+        
+        # 关键修复：每次调用时都从 Redis 重新加载数据，确保获取最新状态
+        self._load_from_redis()
+        
         # 找到对应的节点执行
+        found = False
         for execution in self.node_executions.values():
             if execution.output and execution.output.get("task_id") == task_id:
+                found = True
+                logger.info(f"✅ 找到匹配的节点执行: {execution.node_name} (id={execution.id})")
+                
                 execution.output = output
                 execution.status = NodeStatus.COMPLETED
                 execution.completed_at = datetime.now()
@@ -410,11 +477,16 @@ class WorkflowEngine:
                 # 检查是否需要人工确认
                 if execution.requires_approval:
                     execution.status = NodeStatus.AWAITING_APPROVAL
-                    print(f"⏳ 等待审批: {execution.node_name}")
+                    logger.info(f"⏳ 等待审批: {execution.node_name}")
                 else:
                     # 触发下游节点
+                    logger.info(f"🚀 触发下游节点 (instance_id={execution.instance_id})")
                     self._trigger_ready_nodes(execution.instance_id)
                 break
+        
+        if not found:
+            logger.warning(f"⚠️ 未找到匹配的节点执行: task_id={task_id}")
+            logger.warning(f"   当前内存中的执行数: {len(self.node_executions)}")
     
     def approve_node(self, execution_id: str, decision: str) -> bool:
         """审批节点"""

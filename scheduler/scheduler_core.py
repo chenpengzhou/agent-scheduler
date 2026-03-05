@@ -193,8 +193,9 @@ def execute_task_async(task: Task, queue: RedisQueue):
                 # 通知工作流引擎节点完成
                 if workflow_engine:
                     try:
+                        print(f"🔔 调用 check_node_completion: task_id={task.id}, output={task.output}")
                         workflow_engine.check_node_completion(task.id, task.output or {})
-                        print(f"   → 已通知工作流引擎")
+                        print(f"✅ check_node_completion 返回")
                     except Exception as e:
                         print(f"   ⚠️ 工作流引擎通知失败: {e}")
                 # 触发下游节点
