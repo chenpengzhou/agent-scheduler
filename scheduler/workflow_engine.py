@@ -8,6 +8,7 @@ import json
 import re
 import yaml
 import threading
+import redis
 from datetime import datetime
 from typing import Optional, Dict, Any, List
 from pathlib import Path
@@ -22,10 +23,169 @@ from models import (
 class WorkflowEngine:
     """工作流引擎"""
     
-    def __init__(self):
+    def __init__(self, redis_host: str = "localhost", redis_port: int = 6379, redis_db: int = 0):
+        # Redis 连接
+        self.redis = redis.Redis(
+            host=redis_host,
+            port=redis_port,
+            db=redis_db,
+            decode_responses=True
+        )
+        self._prefix = "workflow"
+        
+        # 内存缓存（从 Redis 加载）
         self.templates: Dict[str, WorkflowTemplate] = {}
         self.instances: Dict[str, WorkflowInstance] = {}
         self.node_executions: Dict[str, NodeExecution] = {}
+        
+        # 从 Redis 加载数据
+        self._load_from_redis()
+    
+    # ========== Redis Key 定义 ==========
+    def _template_key(self, template_id: str) -> str:
+        return f"{self._prefix}:templates:{template_id}"
+    
+    def _instance_key(self, instance_id: str) -> str:
+        return f"{self._prefix}:instances:{instance_id}"
+    
+    def _execution_key(self, execution_id: str) -> str:
+        return f"{self._prefix}:executions:{execution_id}"
+    
+    @property
+    def _template_ids_key(self) -> str:
+        return f"{self._prefix}:template_ids"
+    
+    @property
+    def _instance_ids_key(self) -> str:
+        return f"{self._prefix}:instance_ids"
+    
+    @property
+    def _execution_ids_key(self) -> str:
+        return f"{self._prefix}:execution_ids"
+    
+    # ========== Redis 持久化 ==========
+    def _load_from_redis(self):
+        """从 Redis 加载数据"""
+        try:
+            # 加载模板
+            template_ids = self.redis.smembers(self._template_ids_key) or set()
+            for template_id in template_ids:
+                template_data = self.redis.hgetall(self._template_key(template_id))
+                if template_data:
+                    self._restore_template(template_data)
+            
+            # 加载实例
+            instance_ids = self.redis.smembers(self._instance_ids_key) or set()
+            for instance_id in instance_ids:
+                instance_data = self.redis.hgetall(self._instance_key(instance_id))
+                if instance_data:
+                    self._restore_instance(instance_data)
+            
+            # 加载节点执行
+            execution_ids = self.redis.smembers(self._execution_ids_key) or set()
+            for execution_id in execution_ids:
+                execution_data = self.redis.hgetall(self._execution_key(execution_id))
+                if execution_data:
+                    self._restore_execution(execution_data)
+            
+            print(f"✅ 从 Redis 加载: {len(self.templates)} 模板, {len(self.instances)} 实例, {len(self.node_executions)} 执行")
+        except Exception as e:
+            print(f"⚠️ Redis 加载失败: {e}")
+    
+    def _save_template(self, template: WorkflowTemplate):
+        """保存模板到 Redis"""
+        try:
+            data = template.model_dump()
+            data["created_at"] = template.created_at.isoformat()
+            data["updated_at"] = template.updated_at.isoformat()
+            data = {k: v for k, v in data.items() if v is not None}
+            
+            self.redis.hset(self._template_key(template.id), mapping=data)
+            self.redis.sadd(self._template_ids_key, template.id)
+        except Exception as e:
+            print(f"❌ 保存模板失败: {e}")
+    
+    def _save_instance(self, instance: WorkflowInstance):
+        """保存实例到 Redis"""
+        try:
+            data = instance.model_dump()
+            data["created_at"] = instance.created_at.isoformat()
+            if instance.started_at:
+                data["started_at"] = instance.started_at.isoformat()
+            if instance.completed_at:
+                data["completed_at"] = instance.completed_at.isoformat()
+            data = {k: v for k, v in data.items() if v is not None}
+            
+            self.redis.hset(self._instance_key(instance.id), mapping=data)
+            self.redis.sadd(self._instance_ids_key, instance.id)
+        except Exception as e:
+            print(f"❌ 保存实例失败: {e}")
+    
+    def _save_execution(self, execution: NodeExecution):
+        """保存节点执行到 Redis"""
+        try:
+            data = execution.model_dump()
+            data["created_at"] = execution.created_at.isoformat()
+            if execution.started_at:
+                data["started_at"] = execution.started_at.isoformat()
+            if execution.completed_at:
+                data["completed_at"] = execution.completed_at.isoformat()
+            data = {k: v for k, v in data.items() if v is not None}
+            
+            # 转换复杂类型
+            if "depends_on" in data and isinstance(data["depends_on"], list):
+                data["depends_on"] = json.dumps(data["depends_on"])
+            if "required_fields" in data and isinstance(data["required_fields"], list):
+                data["required_fields"] = json.dumps(data["required_fields"])
+            if "output" in data and isinstance(data["output"], dict):
+                data["output"] = json.dumps(data["output"])
+            
+            self.redis.hset(self._execution_key(execution.id), mapping=data)
+            self.redis.sadd(self._execution_ids_key, execution.id)
+        except Exception as e:
+            print(f"❌ 保存执行失败: {e}")
+    
+    def _restore_template(self, data: dict):
+        """从数据恢复模板"""
+        if "created_at" in data and data["created_at"]:
+            data["created_at"] = datetime.fromisoformat(data["created_at"])
+        if "updated_at" in data and data["updated_at"]:
+            data["updated_at"] = datetime.fromisoformat(data["updated_at"])
+        self.templates[data["id"]] = WorkflowTemplate(**data)
+    
+    def _restore_instance(self, data: dict):
+        """从数据恢复实例"""
+        if "created_at" in data and data["created_at"]:
+            data["created_at"] = datetime.fromisoformat(data["created_at"])
+        if "started_at" in data and data["started_at"]:
+            data["started_at"] = datetime.fromisoformat(data["started_at"])
+        if "completed_at" in data and data["completed_at"]:
+            data["completed_at"] = datetime.fromisoformat(data["completed_at"])
+        data["status"] = WorkflowStatus(data["status"])
+        self.instances[data["id"]] = WorkflowInstance(**data)
+    
+    def _restore_execution(self, data: dict):
+        """从数据恢复执行"""
+        if "created_at" in data and data["created_at"]:
+            data["created_at"] = datetime.fromisoformat(data["created_at"])
+        if "started_at" in data and data["started_at"]:
+            data["started_at"] = datetime.fromisoformat(data["started_at"])
+        if "completed_at" in data and data["completed_at"]:
+            data["completed_at"] = datetime.fromisoformat(data["completed_at"])
+        
+        # 转换复杂类型
+        if "depends_on" in data and data["depends_on"]:
+            data["depends_on"] = json.loads(data["depends_on"])
+        if "required_fields" in data and data["required_fields"]:
+            data["required_fields"] = json.loads(data["required_fields"])
+        if "output" in data and data["output"]:
+            try:
+                data["output"] = json.loads(data["output"])
+            except:
+                pass
+        
+        data["status"] = NodeStatus(data["status"])
+        self.node_executions[data["id"]] = NodeExecution(**data)
     
     # ========== 模板管理 ==========
     
@@ -45,6 +205,8 @@ class WorkflowEngine:
             created_by=created_by
         )
         self.templates[template.id] = template
+        # 持久化到 Redis
+        self._save_template(template)
         return template
     
     def get_template(self, template_id: str) -> Optional[WorkflowTemplate]:
@@ -108,6 +270,8 @@ class WorkflowEngine:
             started_at=datetime.now()
         )
         self.instances[instance.id] = instance
+        # 持久化到 Redis
+        self._save_instance(instance)
         
         # 解析节点并创建执行
         nodes_config = config.get("nodes", [])
@@ -202,6 +366,9 @@ class WorkflowEngine:
         execution.status = NodeStatus.RUNNING
         execution.started_at = datetime.now()
         
+        # 持久化到 Redis
+        self._save_execution(execution)
+        
         # 获取Agent配置
         config = get_agent_config(execution.agent_id)
         
@@ -226,6 +393,7 @@ class WorkflowEngine:
         
         # 保存任务ID到节点执行
         execution.output = {"task_id": task.id}
+        self._save_execution(execution)
     
     def check_node_completion(self, task_id: str, output: Dict[str, Any]):
         """检查节点完成"""
@@ -235,6 +403,9 @@ class WorkflowEngine:
                 execution.output = output
                 execution.status = NodeStatus.COMPLETED
                 execution.completed_at = datetime.now()
+                
+                # 持久化到 Redis
+                self._save_execution(execution)
                 
                 # 检查是否需要人工确认
                 if execution.requires_approval:
