@@ -44,6 +44,50 @@ class WorkflowEngine:
         self._load_from_redis()
         logger.info(f"WorkflowEngine 初始化完成: {len(self.templates)} 模板, {len(self.instances)} 实例, {len(self.node_executions)} 执行")
     
+    def _serialize_value(self, value: Any) -> Any:
+        """序列化值 - 确保所有类型都能存入 Redis"""
+        if value is None:
+            return None
+        elif isinstance(value, bool):
+            return 1 if value else 0
+        elif isinstance(value, (dict, list)):
+            return json.dumps(value, ensure_ascii=False)
+        elif isinstance(value, datetime):
+            return value.isoformat()
+        elif hasattr(value, 'isoformat'):  # 其他 datetime 子类
+            return value.isoformat()
+        else:
+            return value
+    
+    def _deserialize_value(self, key: str, value: Any, field_type: str = None) -> Any:
+        """反序列化值"""
+        if value is None:
+            return None
+        
+        # 尝试自动检测类型
+        if isinstance(value, str):
+            # 尝试解析为 JSON
+            if value.startswith('{') or value.startswith('['):
+                try:
+                    return json.loads(value)
+                except:
+                    pass
+            # 尝试解析为 datetime
+            if 'at' in key.lower() or 'time' in key.lower():
+                try:
+                    return datetime.fromisoformat(value)
+                except:
+                    pass
+            # 尝试解析为 bool/int
+            if value in ('true', 'false'):
+                return value == 'true'
+            try:
+                return int(value)
+            except:
+                pass
+        
+        return value
+    
     def _connect_redis(self):
         """连接 Redis，带重试机制"""
         for attempt in range(3):
@@ -147,7 +191,7 @@ class WorkflowEngine:
             logger.error(traceback.format_exc())
     
     def _save_instance(self, instance: WorkflowInstance):
-        """保存实例到 Redis"""
+        """保存实例到 Redis - 使用统一序列化"""
         try:
             self._connect_redis()  # 确保连接有效
             data = instance.model_dump()
@@ -158,6 +202,17 @@ class WorkflowEngine:
                 data["completed_at"] = instance.completed_at.isoformat()
             data = {k: v for k, v in data.items() if v is not None}
             
+            # 使用统一序列化函数处理所有值
+            data = {k: self._serialize_value(v) for k, v in data.items()}
+            
+            self.redis.hset(self._instance_key(instance.id), mapping=data)
+            self.redis.sadd(self._instance_ids_key, instance.id)
+            logger.info(f"✅ 保存实例到 Redis: {instance.id}")
+        except Exception as e:
+            logger.error(f"❌ 保存实例失败: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            
             self.redis.hset(self._instance_key(instance.id), mapping=data)
             self.redis.sadd(self._instance_ids_key, instance.id)
             logger.info(f"✅ 保存实例到 Redis: {instance.id}")
@@ -167,7 +222,7 @@ class WorkflowEngine:
             logger.error(traceback.format_exc())
     
     def _save_execution(self, execution: NodeExecution):
-        """保存节点执行到 Redis"""
+        """保存节点执行到 Redis - 使用统一序列化"""
         try:
             self._connect_redis()  # 确保连接有效
             data = execution.model_dump()
@@ -178,13 +233,8 @@ class WorkflowEngine:
                 data["completed_at"] = execution.completed_at.isoformat()
             data = {k: v for k, v in data.items() if v is not None}
             
-            # 转换复杂类型
-            if "depends_on" in data and isinstance(data["depends_on"], list):
-                data["depends_on"] = json.dumps(data["depends_on"])
-            if "required_fields" in data and isinstance(data["required_fields"], list):
-                data["required_fields"] = json.dumps(data["required_fields"])
-            if "output" in data and isinstance(data["output"], dict):
-                data["output"] = json.dumps(data["output"])
+            # 使用统一序列化函数处理所有值
+            data = {k: self._serialize_value(v) for k, v in data.items()}
             
             self.redis.hset(self._execution_key(execution.id), mapping=data)
             self.redis.sadd(self._execution_ids_key, execution.id)
@@ -383,8 +433,8 @@ class WorkflowEngine:
         
         return instance
     
-    def _trigger_ready_nodes(self, instance_id: str):
-        """触发就绪的节点"""
+    def _trigger_ready_nodes(self, instance_id: str, max_retries: int = 3):
+        """触发就绪的节点 - 带重试"""
         instance = self.instances.get(instance_id)
         if not instance:
             logger.warning(f"_trigger_ready_nodes: 实例不存在 {instance_id}")
@@ -415,6 +465,19 @@ class WorkflowEngine:
                 # 触发执行
                 logger.info(f"   ✅ 依赖满足，触发节点: {execution.node_name}")
                 self._execute_node(execution)
+    
+    def _trigger_ready_nodes_with_retry(self, instance_id: str):
+        """带重试的下游触发"""
+        for attempt in range(3):
+            try:
+                self._load_from_redis()  # 每次重试前重新加载最新数据
+                self._trigger_ready_nodes(instance_id)
+                return
+            except Exception as e:
+                logger.warning(f"触发下游失败 (尝试 {attempt+1}/3): {e}")
+                if attempt < 2:
+                    import time
+                    time.sleep(0.5 * (attempt + 1))
     
     def _find_execution(self, instance_id: str, node_name: str) -> Optional[NodeExecution]:
         """查找节点执行"""
@@ -487,9 +550,9 @@ class WorkflowEngine:
                     execution.status = NodeStatus.AWAITING_APPROVAL
                     logger.info(f"⏳ 等待审批: {execution.node_name}")
                 else:
-                    # 触发下游节点
+                    # 触发下游节点（使用带重试的方法）
                     logger.info(f"🚀 触发下游节点 (instance_id={execution.instance_id})")
-                    self._trigger_ready_nodes(execution.instance_id)
+                    self._trigger_ready_nodes_with_retry(execution.instance_id)
                 break
         
         if not found:
@@ -507,8 +570,8 @@ class WorkflowEngine:
         if decision == "approve":
             execution.status = NodeStatus.COMPLETED
             execution.completed_at = datetime.now()
-            # 触发下游节点
-            self._trigger_ready_nodes(execution.instance_id)
+            # 触发下游节点（使用带重试的方法）
+            self._trigger_ready_nodes_with_retry(execution.instance_id)
         else:
             # 驳回，重新执行
             execution.status = NodeStatus.PENDING

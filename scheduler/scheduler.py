@@ -8,8 +8,19 @@ import sys
 import json
 import time
 import threading
+import os
 from datetime import datetime
 from typing import Optional
+
+# 生产环境日志级别
+VERBOSE = os.environ.get("SCHEDULER_VERBOSE", "false").lower() == "true"
+
+
+def log(msg: str):
+    """日志输出"""
+    if VERBOSE:
+        print(msg)
+
 
 sys.path.insert(0, "/home/robin/.openclaw/workspace-dev/scheduler")
 from task_queue import RedisQueue
@@ -60,11 +71,11 @@ def send_to_agent_async(agent_key: str, task: dict):
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=90)
         
         if result.returncode == 0:
-            print(f"✅ A2A调用 {agent_name} 成功")
+            log(f"✅ A2A调用 {agent_name} 成功")
         else:
-            print(f"❌ A2A调用失败: {result.stderr[:100]}")
+            log(f"❌ A2A调用失败: {result.stderr[:100]}")
     except Exception as e:
-        print(f"❌ A2A调用异常: {e}")
+        log(f"❌ A2A调用异常: {e}")
 
 
 def send_to_agent(agent_key: str, task: dict):
@@ -73,7 +84,7 @@ def send_to_agent(agent_key: str, task: dict):
     thread = threading.Thread(target=send_to_agent_async, args=(agent_key, task))
     thread.daemon = True
     thread.start()
-    print(f"🔄 已启动 A2A 调用: {AGENT_NAMES.get(agent_key, agent_key)}")
+    log(f"🔄 已启动 A2A 调用: {AGENT_NAMES.get(agent_key, agent_key)}")
 
 
 def process_task(task_id: str) -> bool:
@@ -87,7 +98,7 @@ def process_task(task_id: str) -> bool:
     agent_id = task.agent_id
     created_by = task.created_by or ""
     
-    print(f"处理任务: {task.name} - {status}")
+    log(f"处理任务: {task.name} - {status}")
     
     # 1. pending -> A2A 调用 Agent
     if status == "pending":
@@ -101,7 +112,7 @@ def process_task(task_id: str) -> bool:
                 continue
             pending_task = queue.get_task(pending_id)
             if pending_task and pending_task.name == task_name:
-                print(f"   ⏭️ 跳过：pending 队列中已有同名任务 {task_name}")
+                log(f"   ⏭️ 跳过：pending 队列中已有同名任务 {task_name}")
                 # 移出 pending 队列，避免重复调度
                 queue.redis.lrem(queue.pending_queue, 0, task_id)
                 return False
@@ -113,7 +124,7 @@ def process_task(task_id: str) -> bool:
                 continue
             running_task = queue.get_task(running_id)
             if running_task and running_task.name == task_name:
-                print(f"   ⏭️ 跳过：running 队列中已有同名任务 {task_name}")
+                log(f"   ⏭️ 跳过：running 队列中已有同名任务 {task_name}")
                 # 移出 pending 队列
                 queue.redis.lrem(queue.pending_queue, 0, task_id)
                 return False
@@ -129,7 +140,7 @@ def process_task(task_id: str) -> bool:
             for running_id in running_task_ids:
                 running_task = queue.get_task(running_id)
                 if running_task and running_task.chain_id == chain_id and running_task.id != task_id:
-                    print(f"   ⏭️ 跳过：同链任务 {running_task.name} 正在运行")
+                    log(f"   ⏭️ 跳过：同链任务 {running_task.name} 正在运行")
                     # 移出 pending 队列，避免重复调度
                     queue.redis.lrem(queue.pending_queue, 0, task_id)
                     return False
@@ -146,12 +157,12 @@ def process_task(task_id: str) -> bool:
         # 更新任务状态为 running，避免重复调用
         task.status = TaskStatus.RUNNING
         queue.update_task(task)
-        print(f"   → 已更新状态为 running")
+        log(f"   → 已更新状态为 running")
         return True
     
     # 2. completed -> 触发下游节点
     elif status == "completed":
-        print(f"   ✅ 任务完成: {task.name}")
+        log(f"   ✅ 任务完成: {task.name}")
         # 触发下游节点
         trigger_downstream(task, queue)
         return True
@@ -163,7 +174,7 @@ def trigger_downstream(task, queue: RedisQueue):
     """触发下游依赖任务"""
     # 如果已经触发过下游，不再重复触发
     if task.downstream_triggered:
-        print(f"   ⏭️ 下游已触发，跳过: {task.name}")
+        log(f"   ⏭️ 下游已触发，跳过: {task.name}")
         return
     
     # 标记已触发下游
@@ -193,23 +204,19 @@ def trigger_downstream(task, queue: RedisQueue):
                     downstream.chain_id = task.chain_id  # 继承链ID
                     queue.update_task(downstream)
                     triggered.append(downstream.name)
-                    print(f"   → 触发下游任务: {downstream.name}")
+                    log(f"   → 触发下游任务: {downstream.name}")
     
     if triggered:
-        print(f"   ✅ 已触发 {len(triggered)} 个下游任务")
+        log(f"   ✅ 已触发 {len(triggered)} 个下游任务")
 
 
 def run_scheduler():
     """运行调度系统"""
-    print(f"🔄 调度系统启动 [{datetime.now().strftime('%H:%M:%S')}]")
-    print("-" * 40)
-    
     # 从 Redis 获取待处理任务
     pending_task_ids = queue.get_pending_tasks(limit=10)
-    print(f"📋 待处理任务: {len(pending_task_ids)}")
+    log(f"🔄 巡查启动: {len(pending_task_ids)} 待处理")
     
     if not pending_task_ids:
-        print("✅ 无需处理的任务")
         return
     
     # 处理每个任务
@@ -217,10 +224,7 @@ def run_scheduler():
         try:
             process_task(task_id)
         except Exception as e:
-            print(f"❌ 处理任务失败: {e}")
-    
-    print("-" * 40)
-    print("✅ 巡查完成")
+            log(f"❌ 处理任务失败: {e}")
 
 
 if __name__ == "__main__":

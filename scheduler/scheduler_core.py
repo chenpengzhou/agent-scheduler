@@ -9,8 +9,19 @@ import time
 import re
 import subprocess
 import threading
+import os
 from datetime import datetime
 from typing import Optional, Dict, Any, Tuple
+
+# 生产环境日志级别
+VERBOSE = os.environ.get("SCHEDULER_VERBOSE", "false").lower() == "true"
+
+
+def log(msg: str):
+    """日志输出"""
+    if VERBOSE:
+        print(msg)
+
 
 sys.path.insert(0, "/home/robin/.openclaw/workspace-dev/scheduler")
 from models import Task, TaskStatus, AgentConfig
@@ -126,11 +137,11 @@ Agent: {task.agent_id}
         
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
         if result.returncode == 0:
-            print(f"✅ 已发送错误通知")
+            log(f"✅ 已发送错误通知")
         else:
-            print(f"⚠️ 通知发送失败: {result.stderr[:100]}")
+            log(f"⚠️ 通知发送失败: {result.stderr[:100]}")
     except Exception as e:
-        print(f"❌ 通知异常: {e}")
+        log(f"❌ 通知异常: {e}")
 
 
 def execute_task_async(task: Task, queue: RedisQueue):
@@ -167,7 +178,7 @@ def execute_task_async(task: Task, queue: RedisQueue):
             "--timeout", str(task.timeout)
         ]
         
-        print(f"🔄 执行任务: {task.name} -> {task.agent_id}")
+        log(f"🔄 执行任务: {task.name} -> {task.agent_id}")
         
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=task.timeout + 30)
         
@@ -187,17 +198,17 @@ def execute_task_async(task: Task, queue: RedisQueue):
             if is_valid:
                 task.status = TaskStatus.COMPLETED
                 task.completed_at = datetime.now()
-                print(f"✅ 任务完成: {task.name}")
+                log(f"✅ 任务完成: {task.name}")
                 # 任务完成后移动到completed队列
                 queue.move_to_completed(task.id)
                 # 通知工作流引擎节点完成
                 if workflow_engine:
                     try:
-                        print(f"🔔 调用 check_node_completion: task_id={task.id}, output={task.output}")
+                        log(f"🔔 调用 check_node_completion: task_id={task.id}, output={task.output}")
                         workflow_engine.check_node_completion(task.id, task.output or {})
                         print(f"✅ check_node_completion 返回")
                     except Exception as e:
-                        print(f"   ⚠️ 工作流引擎通知失败: {e}")
+                        log(f"   ⚠️ 工作流引擎通知失败: {e}")
                 # 触发下游节点
                 _trigger_downstream(task, queue)
             else:
@@ -205,7 +216,7 @@ def execute_task_async(task: Task, queue: RedisQueue):
                 if task.retry_count < task.max_retries:
                     task.retry_count += 1
                     task.status = TaskStatus.PENDING
-                    print(f"⚠️ 输出验证失败，重试 {task.retry_count}/{task.max_retries}: {validation_result}")
+                    log(f"⚠️ 输出验证失败，重试 {task.retry_count}/{task.max_retries}: {validation_result}")
                 else:
                     task.status = TaskStatus.FAILED
                     task.error_message = f"输出验证失败: {validation_result}"
@@ -249,7 +260,7 @@ def execute_task(task: Task, queue: RedisQueue):
     thread = threading.Thread(target=execute_task_async, args=(task, queue))
     thread.daemon = True
     thread.start()
-    print(f"🔄 已启动任务: {task.name}")
+    log(f"🔄 已启动任务: {task.name}")
 
 
 def retry_task(task_id: str, queue: RedisQueue) -> bool:
@@ -311,4 +322,4 @@ def _trigger_downstream(task: Task, queue: RedisQueue):
         if triggered:
             print(f"   ✅ 已触发 {len(triggered)} 个下游任务")
     except Exception as e:
-        print(f"   ⚠️ 触发下游任务失败: {e}")
+        log(f"   ⚠️ 触发下游任务失败: {e}")

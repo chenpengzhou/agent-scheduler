@@ -14,6 +14,9 @@ from models import Task, TaskStatus, ScheduleType
 class RedisQueue:
     """Redis 任务队列"""
     
+    # 队列大小限制，防止内存泄漏
+    MAX_QUEUE_SIZE = 10000
+    
     def __init__(self, host: str = "localhost", port: int = 6379, db: int = 0):
         # 配置连接池
         self.pool = redis.ConnectionPool(
@@ -195,30 +198,89 @@ class RedisQueue:
             return None
     
     def move_to_running(self, task_id: str) -> bool:
-        """移动到运行中队列"""
+        """移动到运行中队列 - 原子操作"""
         try:
-            self.redis.lrem(self.pending_queue, 0, task_id)
-            self.redis.rpush(self.running_queue, task_id)
+            pipe = self.redis.pipeline()
+            # 幂等检查
+            task = self.get_task(task_id)
+            if task and task.status in (TaskStatus.RUNNING, TaskStatus.COMPLETED, TaskStatus.FAILED):
+                # 任务已在其他终态，忽略
+                return True
+            
+            # 从 pending 移除，加入 running
+            pipe.lrem(self.pending_queue, 0, task_id)
+            pipe.rpush(self.running_queue, task_id)
+            # 更新状态
+            pipe.hset(self._task_key(task_id), "status", TaskStatus.RUNNING.value)
+            pipe.hset(self._task_key(task_id), "started_at", datetime.now().isoformat())
+            pipe.execute()
             return True
         except Exception as e:
             print(f"❌ 移动到运行队列失败: {e}")
             return False
     
     def move_to_completed(self, task_id: str) -> bool:
-        """移动到完成队列"""
+        """移动到完成队列 - 原子操作 + 幂等"""
         try:
-            self.redis.lrem(self.running_queue, 0, task_id)
-            self.redis.rpush(self.completed_queue, task_id)
+            pipe = self.redis.pipeline()
+            
+            # 幂等检查
+            task = self.get_task(task_id)
+            if task and task.status == TaskStatus.COMPLETED:
+                return True
+            
+            # 从所有队列中移除
+            pipe.lrem(self.pending_queue, 0, task_id)
+            pipe.lrem(self.running_queue, 0, task_id)
+            
+            # 加入完成队列
+            pipe.rpush(self.completed_queue, task_id)
+            
+            # 更新任务状态
+            pipe.hset(self._task_key(task_id), "status", TaskStatus.COMPLETED.value)
+            pipe.hset(self._task_key(task_id), "completed_at", datetime.now().isoformat())
+            
+            pipe.execute()
+            
+            # 清理过期完成队列
+            self._cleanup_old_completed()
+            
             return True
         except Exception as e:
             print(f"❌ 移动到完成队列失败: {e}")
             return False
-    
-    def move_to_failed(self, task_id: str) -> bool:
-        """移动到失败队列"""
+
+    def _cleanup_old_completed(self):
+        """定期清理过期的completed队列，防止内存泄漏"""
         try:
-            self.redis.lrem(self.running_queue, 0, task_id)
-            self.redis.rpush(self.failed_queue, task_id)
+            while self.redis.llen(self.completed_queue) > self.MAX_QUEUE_SIZE:
+                self.redis.lpop(self.completed_queue)
+                print(f"🧹 清理过期完成队列任务，剩余: {self.redis.llen(self.completed_queue)}")
+        except Exception as e:
+            print(f"⚠️ 清理完成队列失败: {e}")
+
+    def move_to_failed(self, task_id: str) -> bool:
+        """移动到失败队列 - 原子操作 + 幂等"""
+        try:
+            pipe = self.redis.pipeline()
+            
+            # 幂等检查
+            task = self.get_task(task_id)
+            if task and task.status == TaskStatus.FAILED:
+                return True
+            
+            # 从所有队列中移除
+            pipe.lrem(self.pending_queue, 0, task_id)
+            pipe.lrem(self.running_queue, 0, task_id)
+            
+            # 加入失败队列
+            pipe.rpush(self.failed_queue, task_id)
+            
+            # 更新任务状态
+            pipe.hset(self._task_key(task_id), "status", TaskStatus.FAILED.value)
+            pipe.hset(self._task_key(task_id), "completed_at", datetime.now().isoformat())
+            
+            pipe.execute()
             return True
         except Exception as e:
             print(f"❌ 移动到失败队列失败: {e}")
