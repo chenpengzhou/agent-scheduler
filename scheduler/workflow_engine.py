@@ -260,6 +260,14 @@ class WorkflowEngine:
             data["started_at"] = datetime.fromisoformat(data["started_at"])
         if "completed_at" in data and data["completed_at"]:
             data["completed_at"] = datetime.fromisoformat(data["completed_at"])
+        
+        # 反序列化 trigger_input (JSON字符串 -> dict)
+        if "trigger_input" in data and data["trigger_input"]:
+            try:
+                data["trigger_input"] = json.loads(data["trigger_input"])
+            except (json.JSONDecodeError, TypeError):
+                pass
+        
         data["status"] = WorkflowStatus(data["status"])
         self.instances[data["id"]] = WorkflowInstance(**data)
     
