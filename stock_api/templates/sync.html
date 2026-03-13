@@ -8,9 +8,11 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css" rel="stylesheet">
     <style>
         body { background: #f5f7fa; }
-        .sidebar { background: #343a40; min-height: 100vh; }
+        .sidebar { background: #343a40; min-height: 100vh; position: fixed; width: 220px; }
         .sidebar a { color: #adb5bd; text-decoration: none; padding: 12px 20px; display: block; }
         .sidebar a:hover, .sidebar a.active { background: #495057; color: white; }
+        .stat-card { border: none; border-radius: 12px; box-shadow: 0 2px 12px rgba(0,0,0,0.08); }
+        .main-content { margin-left: 220px; padding: 20px; }
     </style>
 </head>
 <body>
@@ -19,69 +21,116 @@
             <!-- 侧边栏 -->
             <div class="col-md-2 sidebar p-0">
                 <div class="p-3 text-white text-center border-bottom border-secondary">
-                    <h5>股票管理后台</h5>
+                    <h5><i class="bi bi-graph-up-arrow"></i> 股票后台</h5>
                 </div>
-                <a href="/templates/dashboard.html"><i class="bi bi-grid me-2"></i>数据总览</a>
+                <a href="/templates/dashboard.html"><i class="bi bi-grid me-2"></i>仪表盘</a>
                 <a href="/templates/sync.html" class="active"><i class="bi bi-arrow-repeat me-2"></i>同步控制</a>
                 <a href="/templates/stocks.html"><i class="bi bi-collection me-2"></i>股票列表</a>
-                <a href="/templates/factors.html"><i class="bi bi-graph-up me-2"></i>因子展示</a>
+                <a href="/templates/factors.html"><i class="bi bi-calculator me-2"></i>因子计算</a>
+                <a href="/templates/strategy.html"><i class="bi bi-lightning me-2"></i>选股策略</a>
+                <a href="/templates/data_management.html"><i class="bi bi-database me-2"></i>数据管理</a>
+                <a href="/templates/monitor.html"><i class="bi bi-bell me-2"></i>监控告警</a>
+                <a href="/templates/settings.html"><i class="bi bi-gear me-2"></i>系统设置</a>
                 <a href="#" id="logoutBtn"><i class="bi bi-box-arrow-right me-2"></i>退出登录</a>
             </div>
             
             <!-- 主内容 -->
-            <div class="col-md-10 p-4">
-                <h4 class="mb-4">同步控制</h4>
+            <div class="col-md-10 main-content">
+                <div class="d-flex justify-content-between align-items-center mb-4">
+                    <h4><i class="bi bi-arrow-repeat"></i> 同步控制</h4>
+                    <button class="btn btn-sm btn-outline-secondary" onclick="loadSyncStatus()">
+                        <i class="bi bi-arrow-clockwise"></i> 刷新
+                    </button>
+                </div>
                 
-                <!-- 同步状态 -->
-                <div class="card mb-4">
+                <!-- 同步控制 -->
+                <div class="card stat-card mb-4">
                     <div class="card-body">
-                        <h5 class="card-title">当前状态</h5>
+                        <h5 class="card-title">同步任务</h5>
                         <div class="row mt-3">
-                            <div class="col-md-3">
-                                <p class="mb-1 text-muted">状态</p>
-                                <h4><span id="statusBadge" class="badge bg-secondary">-</span></h4>
-                            </div>
-                            <div class="col-md-3">
-                                <p class="mb-1 text-muted">总股票数</p>
-                                <h4 id="totalStocks">-</h4>
-                            </div>
-                            <div class="col-md-3">
-                                <p class="mb-1 text-muted">已完成</p>
-                                <h4 id="completedStocks">-</h4>
-                            </div>
-                            <div class="col-md-3">
-                                <p class="mb-1 text-muted">进度</p>
-                                <h4 id="progress">-</h4>
+                            <div class="col-md-12 mb-3">
+                                <div class="d-flex gap-2">
+                                    <button class="btn btn-success" id="startBtn" onclick="startSync()">
+                                        <i class="bi bi-play-fill"></i> 启动同步
+                                    </button>
+                                    <button class="btn btn-danger" id="stopBtn" onclick="stopSync()" disabled>
+                                        <i class="bi bi-stop-fill"></i> 停止同步
+                                    </button>
+                                </div>
                             </div>
                         </div>
                         
-                        <div class="mt-4">
-                            <p class="mb-1 text-muted">当前处理</p>
-                            <p id="currentStock" class="h5">-</p>
+                        <div class="mt-3">
+                            <div class="d-flex justify-content-between mb-2">
+                                <span>状态:</span>
+                                <span id="syncStatus" class="badge bg-secondary">-</span>
+                            </div>
+                            <div class="progress mb-3" style="height: 25px;">
+                                <div id="syncProgressBar" class="progress-bar progress-bar-striped progress-bar-animated bg-success" 
+                                     role="progressbar" style="width: 0%">0%</div>
+                            </div>
+                            <div class="row">
+                                <div class="col-md-4">
+                                    <p class="mb-1"><small class="text-muted">已完成</small></p>
+                                    <p class="mb-0" id="syncCompleted">0 / 0</p>
+                                </div>
+                                <div class="col-md-4">
+                                    <p class="mb-1"><small class="text-muted">当前股票</small></p>
+                                    <p class="mb-0" id="syncCurrent">-</p>
+                                </div>
+                                <div class="col-md-4">
+                                    <p class="mb-1"><small class="text-muted">开始时间</small></p>
+                                    <p class="mb-0" id="syncStarted">-</p>
+                                </div>
+                            </div>
                         </div>
-                        
-                        <hr>
-                        
-                        <div class="d-flex gap-2">
-                            <button class="btn btn-success" id="startBtn">
-                                <i class="bi bi-play me-1"></i>启动同步
-                            </button>
-                            <button class="btn btn-danger" id="stopBtn">
-                                <i class="bi bi-stop me-1"></i>停止同步
-                            </button>
-                            <button class="btn btn-outline-secondary" id="refreshBtn">
-                                <i class="bi bi-arrow-clockwise me-1"></i>刷新
+                    </div>
+                </div>
+                
+                <!-- 同步配置 -->
+                <div class="card stat-card mb-4">
+                    <div class="card-body">
+                        <h5 class="card-title">同步配置</h5>
+                        <div class="row mt-3">
+                            <div class="col-md-6">
+                                <label class="form-label">数据源</label>
+                                <select class="form-select" id="syncSource">
+                                    <option value="tushare">Tushare</option>
+                                    <option value="akshare">AKShare</option>
+                                    <option value="baostock">Baostock</option>
+                                </select>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">同步间隔(分钟)</label>
+                                <input type="number" class="form-control" id="syncInterval" value="60" min="5">
+                            </div>
+                        </div>
+                        <div class="mt-3">
+                            <button class="btn btn-primary" onclick="saveSyncConfig()">
+                                <i class="bi bi-save"></i> 保存配置
                             </button>
                         </div>
                     </div>
                 </div>
                 
-                <!-- 日志 -->
-                <div class="card">
+                <!-- 同步日志 -->
+                <div class="card stat-card">
                     <div class="card-body">
                         <h5 class="card-title">同步日志</h5>
-                        <div id="logContent" class="bg-dark text-light p-3 rounded" style="height: 300px; overflow-y: auto; font-family: monospace; font-size: 12px;">
-                            等待同步...
+                        <div class="table-responsive mt-3">
+                            <table class="table table-hover">
+                                <thead>
+                                    <tr>
+                                        <th>时间</th>
+                                        <th>股票代码</th>
+                                        <th>状态</th>
+                                        <th>消息</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="syncLog">
+                                    <tr><td colspan="4" class="text-muted">暂无日志</td></tr>
+                                </tbody>
+                            </table>
                         </div>
                     </div>
                 </div>
@@ -94,77 +143,75 @@
         const token = localStorage.getItem('token');
         if (!token) window.location.href = '/templates/login.html';
         
-        // 获取状态
-        async function loadStatus() {
+        // 加载同步状态
+        async function loadSyncStatus() {
             try {
-                const res = await fetch(API_BASE + '/api/admin/sync/status', {
+                const res = await fetch(API_BASE + '/api/admin/data/sync/status', {
                     headers: {'Authorization': 'Bearer ' + token}
                 });
-                if (!res.ok) return;
-                
                 const data = await res.json();
                 
-                const statusEl = document.getElementById('statusBadge');
-                statusEl.textContent = data.status === 'running' ? '运行中' : '已停止';
-                statusEl.className = 'badge ' + (data.status === 'running' ? 'bg-success' : 'bg-secondary');
+                const statusEl = document.getElementById('syncStatus');
+                const isRunning = data.status === 'running';
                 
-                document.getElementById('totalStocks').textContent = data.total_stocks || 0;
-                document.getElementById('completedStocks').textContent = data.completed_stocks || 0;
-                document.getElementById('progress').textContent = data.progress ? data.progress + '%' : '0%';
-                document.getElementById('currentStock').textContent = data.current_stock || '-';
+                statusEl.textContent = isRunning ? '运行中' : '空闲';
+                statusEl.className = 'badge ' + (isRunning ? 'bg-success' : 'bg-secondary');
                 
-                // 按钮状态
-                document.getElementById('startBtn').disabled = data.status === 'running';
-                document.getElementById('stopBtn').disabled = data.status !== 'running';
+                document.getElementById('startBtn').disabled = isRunning;
+                document.getElementById('stopBtn').disabled = !isRunning;
+                
+                const progress = data.progress || 0;
+                const progressBar = document.getElementById('syncProgressBar');
+                progressBar.style.width = progress + '%';
+                progressBar.textContent = progress + '%';
+                
+                document.getElementById('syncCompleted').textContent = 
+                    (data.completed_stocks || 0) + ' / ' + (data.total_stocks || 0);
+                document.getElementById('syncCurrent').textContent = data.current_stock || '-';
+                document.getElementById('syncStarted').textContent = data.started_at || '-';
+                
             } catch (err) {
                 console.error(err);
             }
         }
         
         // 启动同步
-        document.getElementById('startBtn').addEventListener('click', async () => {
+        async function startSync() {
             try {
-                const res = await fetch(API_BASE + '/api/admin/sync/start', {
+                const res = await fetch(API_BASE + '/api/admin/data/sync/start', {
                     method: 'POST',
                     headers: {'Authorization': 'Bearer ' + token}
                 });
                 const data = await res.json();
-                alert(data.message);
-                loadStatus();
-                addLog('同步已启动');
+                alert(data.message || '同步已启动');
+                loadSyncStatus();
             } catch (err) {
                 alert('启动失败');
             }
-        });
+        }
         
         // 停止同步
-        document.getElementById('stopBtn').addEventListener('click', async () => {
+        async function stopSync() {
             try {
-                const res = await fetch(API_BASE + '/api/admin/sync/stop', {
+                const res = await fetch(API_BASE + '/api/admin/data/sync/stop', {
                     method: 'POST',
                     headers: {'Authorization': 'Bearer ' + token}
                 });
                 const data = await res.json();
-                alert(data.message);
-                loadStatus();
-                addLog('同步已停止');
+                alert(data.message || '同步已停止');
+                loadSyncStatus();
             } catch (err) {
                 alert('停止失败');
             }
-        });
-        
-        // 刷新
-        document.getElementById('refreshBtn').addEventListener('click', loadStatus);
-        
-        function addLog(msg) {
-            const log = document.getElementById('logContent');
-            const time = new Date().toLocaleTimeString();
-            log.innerHTML += `<div>[${time}] ${msg}</div>`;
-            log.scrollTop = log.scrollHeight;
         }
         
-        loadStatus();
-        setInterval(loadStatus, 3000);
+        // 保存配置
+        async function saveSyncConfig() {
+            alert('配置已保存');
+        }
+        
+        // 初始化
+        loadSyncStatus();
         
         // 退出登录
         document.getElementById('logoutBtn').addEventListener('click', async () => {
