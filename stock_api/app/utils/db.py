@@ -200,6 +200,65 @@ def init_db(db_path: str = None):
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_alert_rules_enabled ON alert_rules(enabled)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_alert_records_rule ON alert_records(rule_id)')
     
+    # 持仓表
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS positions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts_code VARCHAR(20) NOT NULL,
+            name VARCHAR(100),
+            quantity INTEGER DEFAULT 0,
+            avg_cost REAL DEFAULT 0,
+            current_price REAL DEFAULT 0,
+            pnl REAL DEFAULT 0,
+            pnl_pct REAL DEFAULT 0,
+            weight REAL DEFAULT 0,
+            position_date VARCHAR(10),
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    
+    # 账户表
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS accounts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name VARCHAR(50) NOT NULL,
+            initial_capital REAL NOT NULL,
+            current_capital REAL NOT NULL,
+            total_value REAL DEFAULT 0,
+            total_pnl REAL DEFAULT 0,
+            total_pnl_pct REAL DEFAULT 0,
+            cash REAL DEFAULT 0,
+            position_value REAL DEFAULT 0,
+            position_count INTEGER DEFAULT 0,
+            trade_count INTEGER DEFAULT 0,
+            win_rate REAL DEFAULT 0,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    
+    # 交易记录表
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS trades (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts_code VARCHAR(20) NOT NULL,
+            name VARCHAR(100),
+            action VARCHAR(10) NOT NULL,
+            quantity INTEGER NOT NULL,
+            price REAL NOT NULL,
+            amount REAL NOT NULL,
+            commission REAL DEFAULT 0,
+            trade_date VARCHAR(10) NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    
+    # 创建索引
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_positions_code ON positions(ts_code)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_positions_date ON positions(position_date)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_trades_code ON trades(ts_code)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_trades_date ON trades(trade_date)')
+    
     conn.commit()
     conn.close()
 
