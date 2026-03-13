@@ -13,6 +13,21 @@ def get_current_user(request: Request) -> dict:
     return request.state.user
 
 
+# ===== 请求模型 =====
+class BacktestRequest(BaseModel):
+    strategy: str
+    start_date: str
+    end_date: str
+    initial_capital: float = 100000
+
+
+class ScreenRequest(BaseModel):
+    min_price: Optional[float] = None
+    max_price: Optional[float] = None
+    min_pe: Optional[float] = None
+    max_pe: Optional[float] = None
+
+
 # ===== 数据管理 =====
 @router.get("/data/sync/status")
 async def get_sync_status(current_user: dict = Depends(get_current_user)):
@@ -93,13 +108,29 @@ async def screen_stocks(
     max_price: Optional[float] = None,
     current_user: dict = Depends(get_current_user)
 ):
-    """选股筛选"""
+    """选股筛选 - GET方式"""
     from app.services.factor_service import factor_service
     criteria = {}
     if min_price:
         criteria["min_price"] = min_price
     if max_price:
         criteria["max_price"] = max_price
+    return factor_service.screen_stocks(criteria)
+
+
+@router.post("/factors/screen")
+async def screen_stocks_post(req: ScreenRequest, current_user: dict = Depends(get_current_user)):
+    """选股筛选 - POST方式 (JSON Body)"""
+    from app.services.factor_service import factor_service
+    criteria = {}
+    if req.min_price:
+        criteria["min_price"] = req.min_price
+    if req.max_price:
+        criteria["max_price"] = req.max_price
+    if req.min_pe:
+        criteria["min_pe"] = req.min_pe
+    if req.max_pe:
+        criteria["max_pe"] = req.max_pe
     return factor_service.screen_stocks(criteria)
 
 
@@ -112,9 +143,16 @@ async def backtest(
     initial_capital: float = 100000,
     current_user: dict = Depends(get_current_user)
 ):
-    """回测"""
+    """回测 - Query参数"""
     from app.services.strategy_service import strategy_service
     return strategy_service.backtest(strategy, start_date, end_date, initial_capital)
+
+
+@router.post("/strategy/backtest/run")
+async def backtest_post(req: BacktestRequest, current_user: dict = Depends(get_current_user)):
+    """回测 - JSON Body (POST)"""
+    from app.services.strategy_service import strategy_service
+    return strategy_service.backtest(req.strategy, req.start_date, req.end_date, req.initial_capital)
 
 
 @router.get("/strategy/signals")
