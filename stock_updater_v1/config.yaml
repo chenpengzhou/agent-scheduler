@@ -1,0 +1,35 @@
+# Stock Updater V1.0 配置
+
+updater:
+  # 数据源配置
+  sources:
+    - name: akshare
+      enabled: true
+      interval: 60  # 分钟
+      priority: 1
+
+    - name: stock_basic
+      enabled: true
+      interval: 3600  # 1小时
+      priority: 2
+
+    - name: index_data
+      enabled: false
+      interval: 60
+      priority: 3
+
+  # 数据库配置
+  database:
+    path: /home/robin/.openclaw/data/stock.db
+
+  # Telegram 配置
+  telegram:
+    enabled: false  # 改为 true 启用
+    bot_token: ${TELEGRAM_BOT_TOKEN}
+    chat_id: ${TELEGRAM_CHAT_ID}
+
+  # 调度配置
+  scheduler:
+    check_interval: 60  # 秒
+    max_retries: 3
+    retry_delay: 300   # 秒

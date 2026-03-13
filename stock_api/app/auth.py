@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 import jwt
 import os
-from .utils.db import init_db, query_one, execute
+from .utils.db import init_db, query_one, query_all, execute
 from .config import SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_HOURS
 
 # 默认管理员配置从环境变量获取
@@ -143,6 +143,94 @@ class AuthService:
         if user:
             user['is_admin'] = user['role'] == 'admin'
         return user
+    
+    def get_all_users(self) -> list:
+        """获取所有用户"""
+        users = query_all("SELECT id, username, role, is_active, created_at, last_login FROM users ORDER BY id")
+        for u in users:
+            u['is_admin'] = u['role'] == 'admin'
+        return users
+    
+    def create_user(self, username: str, password: str, role: str = "user") -> dict:
+        """创建用户"""
+        password_hash = self.get_password_hash(password)
+        user_id = execute(
+            "INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)",
+            (username, password_hash, role)
+        )
+        return {"id": user_id, "username": username, "role": role}
+    
+    def update_user(self, user_id: int, **kwargs) -> bool:
+        """更新用户"""
+        allowed_fields = ['username', 'role', 'is_active']
+        updates = []
+        values = []
+        
+        for field, value in kwargs.items():
+            if field in allowed_fields:
+                updates.append(f"{field} = ?")
+                values.append(value)
+        
+        if not updates:
+            return False
+        
+        values.append(user_id)
+        execute(
+            f"UPDATE users SET {', '.join(updates)} WHERE id = ?",
+            tuple(values)
+        )
+        return True
+    
+    def delete_user(self, user_id: int) -> bool:
+        """删除用户"""
+        # 不能删除admin用户
+        user = query_one("SELECT role FROM users WHERE id = ?", (user_id,))
+        if not user or user['role'] == 'admin':
+            return False
+        
+        execute("DELETE FROM users WHERE id = ?", (user_id,))
+        return True
+    
+    def change_password(self, username: str, old_password: str, new_password: str) -> bool:
+        """修改密码"""
+        user = query_one("SELECT password_hash FROM users WHERE username = ?", (username,))
+        
+        if not user:
+            return False
+        
+        if not self.verify_password(old_password, user['password_hash']):
+            return False
+        
+        new_hash = self.get_password_hash(new_password)
+        execute("UPDATE users SET password_hash = ? WHERE username = ?", (new_hash, username))
+        return True
+    
+    def refresh_token(self, token: str) -> Optional[dict]:
+        """刷新令牌"""
+        payload = self.verify_token(token)
+        if not payload:
+            return None
+        
+        user = query_one(
+            "SELECT id, username, role, is_active FROM users WHERE username = ?",
+            (payload['sub'],)
+        )
+        
+        if not user or not user['is_active']:
+            return None
+        
+        is_admin = user['role'] == 'admin'
+        new_token = self.create_access_token({
+            "sub": user['username'],
+            "user_id": user['id'],
+            "is_admin": is_admin
+        })
+        
+        return {
+            "access_token": new_token,
+            "token_type": "bearer",
+            "expires_in": ACCESS_TOKEN_EXPIRE_HOURS * 3600
+        }
 
 
 # 全局认证服务

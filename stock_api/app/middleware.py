@@ -11,29 +11,32 @@ from app.auth import auth_service
 class AuthMiddleware(BaseHTTPMiddleware):
     """认证中间件"""
     
-    # 公开路径
+    # 公开路径（完全匹配）
     PUBLIC_PATHS = [
         "/",
         "/health",
         "/docs",
         "/openapi.json",
-        "/api/auth/login",
-        "/api/auth/login.html",
-        "/api/auth/logout",
     ]
     
-    # 公开路由前缀
+    # 公开路由前缀（需要认证的路径不包含）
     PUBLIC_PREFIXES = [
         "/static",
         "/templates",
-        "/api/auth",
+    ]
+    
+    # 需要公开的认证相关路径
+    PUBLIC_AUTH_PATHS = [
+        "/api/auth/login",
+        "/api/auth/logout",
+        "/api/auth/refresh",
     ]
     
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
         
         # 检查是否公开
-        if path in self.PUBLIC_PATHS:
+        if path in self.PUBLIC_PATHS or path in self.PUBLIC_AUTH_PATHS:
             return await call_next(request)
         
         for prefix in self.PUBLIC_PREFIXES:

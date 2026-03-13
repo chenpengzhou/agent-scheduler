@@ -212,14 +212,6 @@ class WorkflowEngine:
             logger.error(f"❌ 保存实例失败: {e}")
             import traceback
             logger.error(traceback.format_exc())
-            
-            self.redis.hset(self._instance_key(instance.id), mapping=data)
-            self.redis.sadd(self._instance_ids_key, instance.id)
-            logger.info(f"✅ 保存实例到 Redis: {instance.id}")
-        except Exception as e:
-            logger.error(f"❌ 保存实例失败: {e}")
-            import traceback
-            logger.error(traceback.format_exc())
     
     def _save_execution(self, execution: NodeExecution):
         """保存节点执行到 Redis - 使用统一序列化"""
@@ -264,9 +256,15 @@ class WorkflowEngine:
         # 反序列化 trigger_input (JSON字符串 -> dict)
         if "trigger_input" in data and data["trigger_input"]:
             try:
-                data["trigger_input"] = json.loads(data["trigger_input"])
-            except (json.JSONDecodeError, TypeError):
-                pass
+                # 先处理中文引号问题
+                trigger_input_str = data["trigger_input"]
+                # 将中文引号替换为英文引号
+                trigger_input_str = trigger_input_str.replace('"', '"').replace('"', '"')
+                data["trigger_input"] = json.loads(trigger_input_str)
+            except (json.JSONDecodeError, TypeError, Exception) as e:
+                # 如果还是失败，尝试直接使用原始字符串作为值
+                logger.warning(f"trigger_input 反序列化失败: {e}, 原始值: {data['trigger_input'][:50]}...")
+                data["trigger_input"] = {"raw": data["trigger_input"]}
         
         data["status"] = WorkflowStatus(data["status"])
         self.instances[data["id"]] = WorkflowInstance(**data)
@@ -435,6 +433,8 @@ class WorkflowEngine:
                 depends_on=node.depends_on
             )
             self.node_executions[execution.id] = execution
+            # 保存到 Redis，确保所有节点都能被后续流程找到
+            self._save_execution(execution)
         
         # 触发第一个节点
         self._trigger_ready_nodes(instance.id)
@@ -547,6 +547,33 @@ class WorkflowEngine:
                 logger.info(f"✅ 找到匹配的节点执行: {execution.node_name} (id={execution.id})")
                 
                 execution.output = output
+                
+                # 🆕 新增：验证 required_fields
+                if execution.required_fields:
+                    missing_fields = [f for f in execution.required_fields 
+                                   if f not in output or output.get(f) is None]
+                    if missing_fields:
+                        logger.warning(f"⚠️ 节点输出缺少必要字段: {missing_fields}")
+                        
+                        # 找到上游节点并重新激活
+                        for dep_name in execution.depends_on:
+                            dep_exec = self._find_execution(execution.instance_id, dep_name)
+                            if dep_exec:
+                                dep_exec.status = NodeStatus.PENDING
+                                dep_exec.retry_count += 1
+                                dep_exec.error_message = f"下游节点 {execution.node_name} 缺少字段: {missing_fields}"
+                                self._save_execution(dep_exec)
+                                logger.info(f"🔄 已重新激活上游节点: {dep_name}")
+                        
+                        # 标记当前节点为失败
+                        execution.status = NodeStatus.FAILED
+                        execution.error_message = f"缺少必要字段: {missing_fields}"
+                        execution.completed_at = datetime.now()
+                        self._save_execution(execution)
+                        
+                        logger.error(f"❌ 节点 {execution.node_name} 失败: 缺少字段 {missing_fields}")
+                        return
+                
                 execution.status = NodeStatus.COMPLETED
                 execution.completed_at = datetime.now()
                 

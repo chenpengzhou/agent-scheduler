@@ -102,6 +102,104 @@ def init_db(db_path: str = None):
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_stock_daily_code ON stock_daily(ts_code)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_stock_daily_date ON stock_daily(date)')
     
+    # API配置表
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS api_keys (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name VARCHAR(100) NOT NULL,
+            key_value VARCHAR(255) NOT NULL,
+            is_active BOOLEAN DEFAULT 1,
+            rate_limit INTEGER DEFAULT 100,
+            created_by INTEGER,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            expires_at TIMESTAMP
+        )
+    ''')
+    
+    # 同步配置表
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS sync_configs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name VARCHAR(100) NOT NULL,
+            source VARCHAR(50) NOT NULL,
+            interval_minutes INTEGER DEFAULT 60,
+            enabled BOOLEAN DEFAULT 1,
+            last_sync TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    
+    # 策略表
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS strategies (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name VARCHAR(100) NOT NULL,
+            type VARCHAR(50) NOT NULL,
+            params TEXT,
+            description TEXT,
+            is_active BOOLEAN DEFAULT 1,
+            created_by INTEGER,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    
+    # 回测结果表
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS backtest_results (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            strategy_id INTEGER NOT NULL,
+            start_date VARCHAR(10) NOT NULL,
+            end_date VARCHAR(10) NOT NULL,
+            initial_capital REAL NOT NULL,
+            final_capital REAL,
+            total_return REAL,
+            annual_return REAL,
+            sharpe_ratio REAL,
+            max_drawdown REAL,
+            trades_count INTEGER,
+            details TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (strategy_id) REFERENCES strategies(id)
+        )
+    ''')
+    
+    # 告警规则表
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS alert_rules (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name VARCHAR(100) NOT NULL,
+            type VARCHAR(50) NOT NULL,
+            condition TEXT NOT NULL,
+            threshold REAL,
+            enabled BOOLEAN DEFAULT 1,
+            notify_channels TEXT,
+            created_by INTEGER,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    
+    # 告警记录表
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS alert_records (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            rule_id INTEGER NOT NULL,
+            ts_code VARCHAR(20),
+            message TEXT,
+            severity VARCHAR(20),
+            is_resolved BOOLEAN DEFAULT 0,
+            resolved_at TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (rule_id) REFERENCES alert_rules(id)
+        )
+    ''')
+    
+    # 创建索引
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_api_keys_active ON api_keys(is_active)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_sync_configs_enabled ON sync_configs(enabled)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_strategies_active ON strategies(is_active)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_alert_rules_enabled ON alert_rules(enabled)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_alert_records_rule ON alert_records(rule_id)')
+    
     conn.commit()
     conn.close()
 

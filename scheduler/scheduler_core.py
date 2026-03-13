@@ -297,27 +297,30 @@ def _trigger_downstream(task: Task, queue: RedisQueue):
         triggered = []
         for downstream_id in pending_task_ids:
             downstream = queue.get_task(downstream_id)
-            if downstream and downstream.depends_on:
-                # 检查当前任务是否在依赖列表中
-                deps_met = True
-                for dep_id in downstream.depends_on:
-                    # 支持task id或task name作为依赖
-                    if dep_id != task.id and dep_id != task.name:
-                        continue
-                    # 检查该依赖是否已完成
-                    dep_task = queue.get_task(dep_id)
-                    if dep_task and dep_task.status != TaskStatus.COMPLETED:
-                        deps_met = False
-                        break
+            if not downstream or not downstream.depends_on:
+                continue
                 
-                if deps_met:
-                    # 移除该依赖
-                    downstream.depends_on = [d for d in downstream.depends_on 
-                                            if d != task.id and d != task.name]
-                    downstream.chain_id = task.chain_id  # 继承链ID
-                    queue.update_task(downstream)
-                    triggered.append(downstream.name)
-                    print(f"   → 触发下游任务: {downstream.name}")
+            # 检查当前任务是否在依赖列表中
+            if task.id not in downstream.depends_on and task.name not in downstream.depends_on:
+                continue
+                
+            # 检查所有依赖是否都已完成
+            deps_met = True
+            for dep_id in downstream.depends_on:
+                # 支持task id或task name作为依赖
+                dep_task = queue.get_task(dep_id)
+                if dep_task and dep_task.status != TaskStatus.COMPLETED:
+                    deps_met = False
+                    break
+            
+            if deps_met:
+                # 移除该依赖（当前任务已完成）
+                downstream.depends_on = [d for d in downstream.depends_on 
+                                        if d != task.id and d != task.name]
+                downstream.chain_id = task.chain_id  # 继承链ID
+                queue.update_task(downstream)
+                triggered.append(downstream.name)
+                print(f"   → 触发下游任务: {downstream.name}")
         
         if triggered:
             print(f"   ✅ 已触发 {len(triggered)} 个下游任务")
