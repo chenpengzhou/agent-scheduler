@@ -13,6 +13,15 @@ def get_current_user(request: Request) -> dict:
     return request.state.user
 
 
+class TradeRequest(BaseModel):
+    ts_code: str
+    name: str
+    action: str
+    quantity: int
+    price: float
+    trade_date: Optional[str] = None
+
+
 # ===== 账户操作 =====
 @router.get("")
 async def get_account(current_user: dict = Depends(get_current_user)):
@@ -67,19 +76,11 @@ async def get_trades(
 
 
 @router.post("/trades")
-async def add_trade(
-    ts_code: str,
-    name: str,
-    action: str,
-    quantity: int,
-    price: float,
-    trade_date: Optional[str] = None,
-    current_user: dict = Depends(get_current_user)
-):
+async def add_trade(req: TradeRequest, current_user: dict = Depends(get_current_user)):
     """添加交易记录"""
     from app.services.account_service import account_service
     
-    if action not in ['buy', 'sell']:
+    if req.action not in ['buy', 'sell']:
         raise HTTPException(status_code=400, detail="action必须是buy或sell")
     
-    return account_service.add_trade(ts_code, name, action, quantity, price, trade_date)
+    return account_service.add_trade(req.ts_code, req.name, req.action, req.quantity, req.price, req.trade_date)
