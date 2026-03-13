@@ -21,6 +21,14 @@ class BacktestRequest(BaseModel):
     initial_capital: float = 100000
 
 
+class AlertRuleRequest(BaseModel):
+    name: str
+    type: str
+    condition: Optional[str] = "gt"
+    threshold: float = 5.0
+    enabled: bool = True
+
+
 class ScreenRequest(BaseModel):
     min_price: Optional[float] = None
     max_price: Optional[float] = None
@@ -210,25 +218,154 @@ async def get_alerts(current_user: dict = Depends(get_current_user)):
 
 @router.post("/monitor/rules")
 async def create_alert_rule(
-    name: str,
-    type: str,
-    threshold: float = 5.0,
+    req: AlertRuleRequest,
     current_user: dict = Depends(get_current_user)
 ):
     """创建告警规则"""
     from app.services.monitor_service import monitor_service
-    return monitor_service.create_alert_rule({
-        "name": name,
-        "type": type,
-        "threshold": threshold
-    })
+    return monitor_service.create_alert_rule(req.dict())
 
 
 @router.get("/monitor/rules")
-async def get_alert_rules(current_user: dict = Depends(get_current_user)):
+async def get_alert_rules(enabled_only: bool = False, current_user: dict = Depends(get_current_user)):
     """获取告警规则"""
     from app.services.monitor_service import monitor_service
-    return monitor_service.get_alert_rules()
+    return monitor_service.get_alert_rules(enabled_only)
+
+
+@router.put("/monitor/rules/{rule_id}")
+async def update_alert_rule(
+    rule_id: int,
+    name: Optional[str] = None,
+    type: Optional[str] = None,
+    threshold: Optional[float] = None,
+    enabled: Optional[bool] = None,
+    current_user: dict = Depends(get_current_user)
+):
+    """更新告警规则"""
+    from app.services.monitor_service import monitor_service
+    
+    updates = {}
+    if name:
+        updates['name'] = name
+    if type:
+        updates['type'] = type
+    if threshold is not None:
+        updates['threshold'] = threshold
+    if enabled is not None:
+        updates['enabled'] = enabled
+    
+    success = monitor_service.update_alert_rule(rule_id, **updates)
+    
+    if not success:
+        raise HTTPException(status_code=400, detail="更新失败")
+    
+    return {"message": "规则已更新"}
+
+
+@router.delete("/monitor/rules/{rule_id}")
+async def delete_alert_rule(rule_id: int, current_user: dict = Depends(get_current_user)):
+    """删除告警规则"""
+    from app.services.monitor_service import monitor_service
+    success = monitor_service.delete_alert_rule(rule_id)
+    
+    if not success:
+        raise HTTPException(status_code=400, detail="删除失败")
+    
+    return {"message": "规则已删除"}
+
+
+@router.get("/monitor/records")
+async def get_alert_records(
+    resolved: bool = False,
+    limit: int = 50,
+    current_user: dict = Depends(get_current_user)
+):
+    """获取告警记录"""
+    from app.services.monitor_service import monitor_service
+    return monitor_service.get_alert_records(resolved, limit)
+
+
+@router.post("/monitor/records/{record_id}/resolve")
+async def resolve_alert(record_id: int, current_user: dict = Depends(get_current_user)):
+    """确认告警"""
+    from app.services.monitor_service import monitor_service
+    success = monitor_service.resolve_alert(record_id)
+    
+    if not success:
+        raise HTTPException(status_code=400, detail="确认失败")
+    
+    return {"message": "告警已确认"}
+
+
+@router.delete("/monitor/records/{record_id}")
+async def delete_alert_record(record_id: int, current_user: dict = Depends(get_current_user)):
+    """删除告警记录"""
+    from app.services.monitor_service import monitor_service
+    success = monitor_service.delete_alert_record(record_id)
+    
+    if not success:
+        raise HTTPException(status_code=400, detail="删除失败")
+    
+    return {"message": "记录已删除"}
+
+
+@router.get("/monitor/stats")
+async def get_alert_stats(current_user: dict = Depends(get_current_user)):
+    """获取告警统计"""
+    from app.services.monitor_service import monitor_service
+    return monitor_service.get_alert_stats()
+
+
+# ===== 因子计算增强 =====
+@router.get("/factors/low-volatility")
+async def get_low_volatility_stocks(
+    days: int = 60,
+    top_n: int = 20,
+    current_user: dict = Depends(get_current_user)
+):
+    """获取低波动率股票"""
+    from app.services.factor_service import factor_service
+    return factor_service.get_low_volatility_stocks(days, top_n)
+
+
+@router.get("/factors/high-dividend")
+async def get_high_dividend_stocks(
+    top_n: int = 20,
+    current_user: dict = Depends(get_current_user)
+):
+    """获取高股息股票"""
+    from app.services.factor_service import factor_service
+    return factor_service.get_high_dividend_stocks(top_n)
+
+
+@router.get("/factors/pe-roe")
+async def get_pe_roe_stocks(
+    min_pe: float = 0,
+    max_pe: float = 30,
+    min_roe: float = 5,
+    top_n: int = 20,
+    current_user: dict = Depends(get_current_user)
+):
+    """获取PE-ROE策略股票"""
+    from app.services.factor_service import factor_service
+    return factor_service.get_pe_roe_stocks(min_pe, max_pe, min_roe, top_n)
+
+
+@router.get("/factors/custom/{code}")
+async def get_custom_factor(
+    code: str,
+    factor_name: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """计算自定义因子"""
+    from app.services.factor_service import factor_service
+    value = factor_service.calculate_custom_factor(code, factor_name)
+    
+    if value is None:
+        raise HTTPException(status_code=404, detail="因子计算失败")
+    
+    return {"code": code, "factor": factor_name, "value": value}
 
 
 # ===== 系统设置 =====
