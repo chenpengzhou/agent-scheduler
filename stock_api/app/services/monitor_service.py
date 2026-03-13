@@ -95,13 +95,17 @@ class MonitorService:
                     values.append(v)
         
         if not updates:
-            return False
+            # 没有要更新的字段也算成功
+            conn.close()
+            return True
         
         values.append(rule_id)
-        conn.execute(f"UPDATE alert_rules SET {', '.join(updates)} WHERE id = ?", tuple(values))
+        cursor = conn.cursor()
+        cursor.execute(f"UPDATE alert_rules SET {', '.join(updates)} WHERE id = ?", tuple(values))
         conn.commit()
+        result = cursor.rowcount > 0
         conn.close()
-        return True
+        return result
     
     def delete_alert_rule(self, rule_id: int) -> bool:
         """删除告警规则"""

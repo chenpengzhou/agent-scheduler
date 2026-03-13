@@ -237,7 +237,8 @@ async def get_alert_rules(enabled_only: bool = False, current_user: dict = Depen
 async def update_alert_rule(
     rule_id: int,
     name: Optional[str] = None,
-    type: Optional[str] = None,
+    rule_type: Optional[str] = None,
+    condition: Optional[str] = None,
     threshold: Optional[float] = None,
     enabled: Optional[bool] = None,
     current_user: dict = Depends(get_current_user)
@@ -248,8 +249,10 @@ async def update_alert_rule(
     updates = {}
     if name:
         updates['name'] = name
-    if type:
-        updates['type'] = type
+    if rule_type:
+        updates['type'] = rule_type
+    if condition:
+        updates['condition'] = condition
     if threshold is not None:
         updates['threshold'] = threshold
     if enabled is not None:
@@ -400,3 +403,33 @@ async def get_sync_config(current_user: dict = Depends(get_current_user)):
     """获取同步配置"""
     from app.services.settings_service import settings_service
     return settings_service.get_sync_config()
+
+
+# ===== 推送配置 =====
+@router.get("/settings/push")
+async def get_push_config(current_user: dict = Depends(get_current_user)):
+    """获取推送配置"""
+    from app.services.monitor_service import monitor_service
+    return {
+        "telegram_enabled": monitor_service.telegram_enabled,
+        "telegram_bot_token": "***" if monitor_service.telegram_bot_token else "",
+        "telegram_chat_id": "***" if monitor_service.telegram_chat_id else ""
+    }
+
+
+@router.post("/settings/push")
+async def configure_push(
+    telegram_token: Optional[str] = None,
+    telegram_chat_id: Optional[str] = None,
+    enabled: bool = False,
+    current_user: dict = Depends(get_current_user)
+):
+    """配置推送"""
+    from app.services.monitor_service import monitor_service
+    
+    if telegram_token:
+        monitor_service.configure_telegram(telegram_token, telegram_chat_id or "")
+    
+    monitor_service.telegram_enabled = enabled
+    
+    return {"message": "推送配置已更新"}
