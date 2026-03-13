@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>监控告警 - 股票系统管理后台</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css" rel="stylesheet">
+    <style>
+        body { background: #f5f7fa; }
+        .sidebar { background: #343a40; min-height: 100vh; }
+        .sidebar a { color: #adb5bd; text-decoration: none; padding: 12px 20px; display: block; }
+        .sidebar a:hover, .sidebar a.active { background: #495057; color: white; }
+    </style>
+</head>
+<body>
+    <div class="container-fluid">
+        <div class="row">
+            <div class="col-md-2 sidebar p-0">
+                <div class="p-3 text-white text-center border-bottom border-secondary">
+                    <h5>股票管理后台</h5>
+                </div>
+                <a href="/templates/dashboard.html"><i class="bi bi-grid me-2"></i>数据总览</a>
+                <a href="/templates/sync.html"><i class="bi bi-arrow-repeat me-2"></i>同步控制</a>
+                <a href="/templates/stocks.html"><i class="bi bi-collection me-2"></i>股票列表</a>
+                <a href="/templates/factors.html"><i class="bi bi-graph-up me-2"></i>因子展示</a>
+                <a href="/templates/data_management.html"><i class="bi bi-database me-2"></i>数据管理</a>
+                <a href="/templates/strategy.html"><i class="bi bi-lightning me-2"></i>选股策略</a>
+                <a href="/templates/monitor.html" class="active"><i class="bi bi-bell me-2"></i>监控告警</a>
+                <a href="/templates/settings.html"><i class="bi bi-gear me-2"></i>系统设置</a>
+                <a href="#" id="logoutBtn"><i class="bi bi-box-arrow-right me-2"></i>退出登录</a>
+            </div>
+            
+            <div class="col-md-10 p-4">
+                <h4 class="mb-4">监控告警</h4>
+                
+                <!-- 告警概览 -->
+                <div class="row mb-4">
+                    <div class="col-md-4">
+                        <div class="card border-warning">
+                            <div class="card-body">
+                                <h5 class="card-title text-warning">价格异动</h5>
+                                <h2 id="priceAlertCount">0</h2>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="card border-info">
+                            <div class="card-body">
+                                <h5 class="card-title text-info">成交量异动</h5>
+                                <h2 id="volumeAlertCount">0</h2>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="card border-danger">
+                            <div class="card-body">
+                                <h5 class="card-title text-danger">数据异常</h5>
+                                <h2 id="anomalyCount">0</h2>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- 告警列表 -->
+                <div class="card mb-4">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <h5 class="card-title">实时告警</h5>
+                            <button class="btn btn-sm btn-primary" onclick="loadAlerts()">刷新</button>
+                        </div>
+                        
+                        <ul class="nav nav-tabs mt-3" id="alertTabs" role="tablist">
+                            <li class="nav-item">
+                                <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#priceAlerts">价格异动</button>
+                            </li>
+                            <li class="nav-item">
+                                <button class="nav-link" data-bs-toggle="tab" data-bs-target="#volumeAlerts">成交量异动</button>
+                            </li>
+                            <li class="nav-item">
+                                <button class="nav-link" data-bs-toggle="tab" data-bs-target="#anomalies">数据异常</button>
+                            </li>
+                        </ul>
+                        
+                        <div class="tab-content mt-3">
+                            <div class="tab-pane fade show active" id="priceAlerts">
+                                <table class="table table-sm" id="priceTable">
+                                    <thead><tr><th>代码</th><th>涨跌幅</th><th>价格</th><th>级别</th></tr></thead>
+                                    <tbody></tbody>
+                                </table>
+                            </div>
+                            <div class="tab-pane fade" id="volumeAlerts">
+                                <table class="table table-sm" id="volumeTable">
+                                    <thead><tr><th>代码</th><th>成交量</th><th>级别</th></tr></thead>
+                                    <tbody></tbody>
+                                </table>
+                            </div>
+                            <div class="tab-pane fade" id="anomalies">
+                                <table class="table table-sm" id="anomalyTable">
+                                    <thead><tr><th>代码</th><th>日期</th><th>问题</th><th>级别</th></tr></thead>
+                                    <tbody></tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- 告警规则 -->
+                <div class="card">
+                    <div class="card-body">
+                        <h5 class="card-title">告警规则</h5>
+                        <div class="row mt-3">
+                            <div class="col-md-3">
+                                <input type="text" class="form-control" id="ruleName" placeholder="规则名称">
+                            </div>
+                            <div class="col-md-3">
+                                <select class="form-select" id="ruleType">
+                                    <option value="price">价格异动</option>
+                                    <option value="volume">成交量异动</option>
+                                    <option value="anomaly">数据异常</option>
+                                </select>
+                            </div>
+                            <div class="col-md-3">
+                                <input type="number" class="form-control" id="ruleThreshold" placeholder="阈值(%)" value="5">
+                            </div>
+                            <div class="col-md-3">
+                                <button class="btn btn-primary" onclick="createRule()">创建规则</button>
+                            </div>
+                        </div>
+                        
+                        <table class="table table-sm mt-3" id="rulesTable">
+                            <thead><tr><th>名称</th><th>类型</th><th>阈值</th><th>状态</th></tr></thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = '';
+        const token = localStorage.getItem('token');
+        if (!token) window.location.href = '/templates/login.html';
+        
+        async function loadAlerts() {
+            try {
+                const res = await fetch(API_BASE + '/api/admin/monitor/alerts', {
+                    headers: {'Authorization': 'Bearer ' + token}
+                });
+                const data = await res.json();
+                
+                // 更新计数
+                document.getElementById('priceAlertCount').textContent = data.price_alerts?.length || 0;
+                document.getElementById('volumeAlertCount').textContent = data.volume_alerts?.length || 0;
+                document.getElementById('anomalyCount').textContent = data.data_anomalies?.length || 0;
+                
+                // 填充表格
+                document.querySelector('#priceTable tbody').innerHTML = (data.price_alerts || []).map(a => `
+                    <tr>
+                        <td>${a.code}</td>
+                        <td class="${a.direction === '↑' ? 'text-success' : 'text-danger'}">${a.direction} ${a.change_pct}%</td>
+                        <td>${a.price}</td>
+                        <td><span class="badge bg-${a.severity === 'high' ? 'danger' : 'warning'}">${a.severity}</span></td>
+                    </tr>
+                `).join('');
+                
+                document.querySelector('#volumeTable tbody').innerHTML = (data.volume_alerts || []).map(a => `
+                    <tr><td>${a.code}</td><td>${a.volume}</td><td><span class="badge bg-warning">${a.severity}</span></td></tr>
+                `).join('');
+                
+                document.querySelector('#anomalyTable tbody').innerHTML = (data.data_anomalies || []).map(a => `
+                    <tr><td>${a.code}</td><td>${a.date}</td><td>${a.issue}</td><td><span class="badge bg-danger">${a.severity}</span></td></tr>
+                `).join('');
+                
+            } catch (err) {
+                console.error(err);
+            }
+        }
+        
+        async function createRule() {
+            const name = document.getElementById('ruleName').value;
+            const type = document.getElementById('ruleType').value;
+            const threshold = document.getElementById('ruleThreshold').value;
+            
+            try {
+                const res = await fetch(API_BASE + '/api/admin/monitor/rules?name=' + name + 
+                    '&type=' + type + '&threshold=' + threshold, {
+                    method: 'POST',
+                    headers: {'Authorization': 'Bearer ' + token}
+                });
+                alert('规则已创建');
+                loadAlerts();
+            } catch (err) {
+                alert('创建失败');
+            }
+        }
+        
+        loadAlerts();
+        
+        document.getElementById('logoutBtn').addEventListener('click', async () => {
+            await fetch(API_BASE + '/api/auth/logout', {
+                method: 'POST',
+                headers: {'Authorization': 'Bearer ' + token}
+            });
+            localStorage.clear();
+            window.location.href = '/templates/login.html';
+        });
+    </script>
+</body>
+</html>

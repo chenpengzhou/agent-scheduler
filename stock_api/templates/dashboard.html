@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>数据总览 - 股票系统管理后台</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body { background: #f5f7fa; }
+        .sidebar { background: #343a40; min-height: 100vh; }
+        .sidebar a { color: #adb5bd; text-decoration: none; padding: 12px 20px; display: block; }
+        .sidebar a:hover, .sidebar a.active { background: #495057; color: white; }
+        .stat-card { border: none; border-radius: 12px; box-shadow: 0 2px 12px rgba(0,0,0,0.08); }
+    </style>
+</head>
+<body>
+    <div class="container-fluid">
+        <div class="row">
+            <!-- 侧边栏 -->
+            <div class="col-md-2 sidebar p-0">
+                <div class="p-3 text-white text-center border-bottom border-secondary">
+                    <h5>股票管理后台</h5>
+                </div>
+                <a href="/templates/dashboard.html" class="active"><i class="bi bi-grid me-2"></i>数据总览</a>
+                <a href="/templates/sync.html"><i class="bi bi-arrow-repeat me-2"></i>同步控制</a>
+                <a href="/templates/stocks.html"><i class="bi bi-collection me-2"></i>股票列表</a>
+                <a href="/templates/factors.html"><i class="bi bi-graph-up me-2"></i>因子展示</a>
+                <a href="#" id="logoutBtn"><i class="bi bi-box-arrow-right me-2"></i>退出登录</a>
+            </div>
+            
+            <!-- 主内容 -->
+            <div class="col-md-10 p-4">
+                <h4 class="mb-4">数据总览</h4>
+                
+                <!-- 统计卡片 -->
+                <div class="row mb-4">
+                    <div class="col-md-4">
+                        <div class="card stat-card">
+                            <div class="card-body">
+                                <div class="text-muted">股票数量</div>
+                                <h2 class="mb-0" id="stockCount">-</h2>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="card stat-card">
+                            <div class="card-body">
+                                <div class="text-muted">数据记录</div>
+                                <h2 class="mb-0" id="recordCount">-</h2>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="card stat-card">
+                            <div class="card-body">
+                                <div class="text-muted">数据范围</div>
+                                <h6 class="mb-0" id="dateRange">-</h6>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- 同步状态 -->
+                <div class="card stat-card">
+                    <div class="card-body">
+                        <h5 class="card-title">同步状态</h5>
+                        <div class="row mt-3">
+                            <div class="col-md-3">
+                                <span class="text-muted">状态:</span>
+                                <span id="syncStatus" class="badge bg-secondary">-</span>
+                            </div>
+                            <div class="col-md-3">
+                                <span class="text-muted">进度:</span>
+                                <span id="syncProgress">-</span>
+                            </div>
+                            <div class="col-md-6">
+                                <span class="text-muted">当前:</span>
+                                <span id="syncCurrent">-</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = '';
+        
+        // 检查登录
+        const token = localStorage.getItem('token');
+        if (!token) window.location.href = '/templates/login.html';
+        
+        // 获取统计
+        async function loadStats() {
+            try {
+                const res = await fetch(API_BASE + '/api/admin/stats', {
+                    headers: {'Authorization': 'Bearer ' + token}
+                });
+                if (!res.ok) { alert('请重新登录'); window.location.href = '/templates/login.html'; }
+                
+                const data = await res.json();
+                
+                document.getElementById('stockCount').textContent = data.stock_count || 0;
+                document.getElementById('recordCount').textContent = (data.record_count || 0).toLocaleString();
+                
+                if (data.date_range && data.date_range.start) {
+                    document.getElementById('dateRange').textContent = 
+                        data.date_range.start + ' ~ ' + data.date_range.end;
+                }
+                
+                // 同步状态
+                const sync = data.sync;
+                const statusEl = document.getElementById('syncStatus');
+                statusEl.textContent = sync.status === 'running' ? '运行中' : '已停止';
+                statusEl.className = 'badge ' + (sync.status === 'running' ? 'bg-success' : 'bg-secondary');
+                
+                document.getElementById('syncProgress').textContent = 
+                    sync.progress ? sync.progress + '%' : '0%';
+                document.getElementById('syncCurrent').textContent = sync.current_stock || '-';
+            } catch (err) {
+                console.error(err);
+            }
+        }
+        
+        loadStats();
+        
+        // 退出登录
+        document.getElementById('logoutBtn').addEventListener('click', async () => {
+            await fetch(API_BASE + '/api/auth/logout', {
+                method: 'POST',
+                headers: {'Authorization': 'Bearer ' + token}
+            });
+            localStorage.clear();
+            window.location.href = '/templates/login.html';
+        });
+    </script>
+</body>
+</html>
