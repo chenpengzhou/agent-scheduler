@@ -24,7 +24,7 @@ app = FastAPI(
 )
 
 # CORS - 限制域名
-origins = CORS_ORIGINS if CORS_ORIGINS != ["*"] else ["*"]
+origins = CORS_ORIGINS if CORS_ORIGINS else []
 
 app.add_middleware(
     CORSMiddleware,
