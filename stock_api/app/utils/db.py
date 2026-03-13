@@ -1,25 +1,70 @@
 # -*- coding: utf-8 -*-
 """
-数据库工具
+数据库连接池和缓存
 """
 import sqlite3
 import os
-from typing import Optional, List, Dict
+import time
+from functools import lru_cache
+from typing import Optional
 
-# 数据库路径配置
-STOCK_DB_PATH = os.environ.get('STOCK_DB_PATH', os.path.expanduser('~/.openclaw/data/stock.db'))
+# SQLite配置
+STOCK_DB_PATH = os.environ.get('STOCK_DB_PATH', os.path.expanduser("~/.openclaw/data/stock.db"))
+
+# 缓存配置
+CACHE_TTL = 300  # 5分钟缓存
+
+# 简单内存缓存
+class SimpleCache:
+    def __init__(self):
+        self._cache = {}
+        self._times = {}
+    
+    def get(self, key: str) -> Optional[any]:
+        if key in self._cache:
+            if time.time() - self._times[key] < CACHE_TTL:
+                return self._cache[key]
+            del self._cache[key]
+            del self._times[key]
+        return None
+    
+    def set(self, key: str, value: any):
+        self._cache[key] = value
+        self._times[key] = time.time()
+    
+    def clear(self):
+        self._cache.clear()
+        self._times.clear()
+    
+    def delete(self, key: str):
+        if key in self._cache:
+            del self._cache[key]
+            del self._times[key]
+
+
+# 全局缓存实例
+cache = SimpleCache()
 
 
 def get_connection(db_path: str = None) -> sqlite3.Connection:
     """获取数据库连接"""
     path = db_path or STOCK_DB_PATH
-    conn = sqlite3.connect(path)
+    conn = sqlite3.connect(path, check_same_thread=False)
     conn.row_factory = sqlite3.Row
+    
+    # 启用WAL模式
+    try:
+        conn.execute('PRAGMA journal_mode=WAL')
+        conn.execute('PRAGMA synchronous=NORMAL')
+        conn.execute('PRAGMA cache_size=10000')
+    except:
+        pass
+    
     return conn
 
 
 def init_db(db_path: str = None):
-    """初始化数据库表"""
+    """初始化数据库"""
     path = db_path or STOCK_DB_PATH
     os.makedirs(os.path.dirname(path), exist_ok=True)
     
@@ -97,10 +142,6 @@ def init_db(db_path: str = None):
             UNIQUE(ts_code, date)
         )
     ''')
-    
-    # 创建索引
-    cursor.execute('CREATE INDEX IF NOT EXISTS idx_stock_daily_code ON stock_daily(ts_code)')
-    cursor.execute('CREATE INDEX IF NOT EXISTS idx_stock_daily_date ON stock_daily(date)')
     
     # API配置表
     cursor.execute('''
@@ -193,13 +234,6 @@ def init_db(db_path: str = None):
         )
     ''')
     
-    # 创建索引
-    cursor.execute('CREATE INDEX IF NOT EXISTS idx_api_keys_active ON api_keys(is_active)')
-    cursor.execute('CREATE INDEX IF NOT EXISTS idx_sync_configs_enabled ON sync_configs(enabled)')
-    cursor.execute('CREATE INDEX IF NOT EXISTS idx_strategies_active ON strategies(is_active)')
-    cursor.execute('CREATE INDEX IF NOT EXISTS idx_alert_rules_enabled ON alert_rules(enabled)')
-    cursor.execute('CREATE INDEX IF NOT EXISTS idx_alert_records_rule ON alert_records(rule_id)')
-    
     # 持仓表
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS positions (
@@ -254,6 +288,13 @@ def init_db(db_path: str = None):
     ''')
     
     # 创建索引
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_stock_daily_code ON stock_daily(ts_code)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_stock_daily_date ON stock_daily(date)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_api_keys_active ON api_keys(is_active)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_sync_configs_enabled ON sync_configs(enabled)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_strategies_active ON strategies(is_active)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_alert_rules_enabled ON alert_rules(enabled)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_alert_records_rule ON alert_records(rule_id)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_positions_code ON positions(ts_code)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_positions_date ON positions(position_date)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_trades_code ON trades(ts_code)')
@@ -264,12 +305,18 @@ def init_db(db_path: str = None):
 
 
 def get_stock_connection():
-    """获取股票数据库连接"""
     return get_connection(STOCK_DB_PATH)
 
 
-def query_one(sql: str, params: tuple = None, db_path: str = None) -> Optional[Dict]:
+def query_one(sql: str, params: tuple = None, db_path: str = None, use_cache: bool = False) -> Optional[dict]:
     """查询单条记录"""
+    # 尝试从缓存获取
+    cache_key = f"query_one:{sql}:{params}"
+    if use_cache:
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return cached
+    
     conn = get_connection(db_path)
     cursor = conn.cursor()
     
@@ -281,11 +328,23 @@ def query_one(sql: str, params: tuple = None, db_path: str = None) -> Optional[D
     row = cursor.fetchone()
     conn.close()
     
-    return dict(row) if row else None
+    result = dict(row) if row else None
+    
+    if use_cache and result:
+        cache.set(cache_key, result)
+    
+    return result
 
 
-def query_all(sql: str, params: tuple = None, db_path: str = None) -> List[Dict]:
+def query_all(sql: str, params: tuple = None, db_path: str = None, use_cache: bool = False) -> list:
     """查询多条记录"""
+    # 尝试从缓存获取
+    cache_key = f"query_all:{sql}:{params}"
+    if use_cache:
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return cached
+    
     conn = get_connection(db_path)
     cursor = conn.cursor()
     
@@ -297,7 +356,12 @@ def query_all(sql: str, params: tuple = None, db_path: str = None) -> List[Dict]
     rows = cursor.fetchall()
     conn.close()
     
-    return [dict(row) for row in rows]
+    result = [dict(row) for row in rows]
+    
+    if use_cache and result:
+        cache.set(cache_key, result)
+    
+    return result
 
 
 def execute(sql: str, params: tuple = None, db_path: str = None) -> int:
@@ -313,5 +377,8 @@ def execute(sql: str, params: tuple = None, db_path: str = None) -> int:
     conn.commit()
     last_id = cursor.lastrowid
     conn.close()
+    
+    # 清除相关缓存
+    cache.clear()
     
     return last_id
