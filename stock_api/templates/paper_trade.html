@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>模拟交易 - 股票系统管理后台</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css" rel="stylesheet">
+    <style>
+        body { background: #f5f7fa; }
+        .sidebar { background: #343a40; min-height: 100vh; position: fixed; width: 220px; }
+        .sidebar a { color: #adb5bd; text-decoration: none; padding: 12px 20px; display: block; }
+        .sidebar a:hover, .sidebar a.active { background: #495057; color: white; }
+        .stat-card { border: none; border-radius: 12px; box-shadow: 0 2px 12px rgba(0,0,0,0.08); }
+        .main-content { margin-left: 220px; padding: 20px; }
+        .profit { color: #dc3545; }
+        .loss { color: #198754; }
+    </style>
+</head>
+<body>
+    <div class="container-fluid">
+        <div class="row">
+            <!-- 侧边栏 -->
+            <div class="col-md-2 sidebar p-0">
+                <div class="p-3 text-white text-center border-bottom border-secondary">
+                    <h5><i class="bi bi-graph-up-arrow"></i> 股票后台</h5>
+                </div>
+                <a href="/templates/dashboard.html"><i class="bi bi-grid me-2"></i>仪表盘</a>
+                <a href="/templates/sync.html"><i class="bi bi-arrow-repeat me-2"></i>同步控制</a>
+                <a href="/templates/stocks.html"><i class="bi bi-collection me-2"></i>股票列表</a>
+                <a href="/templates/factors.html"><i class="bi bi-calculator me-2"></i>因子计算</a>
+                <a href="/templates/strategy.html"><i class="bi bi-lightning me-2"></i>选股策略</a>
+                <a href="/templates/paper_trade.html" class="active"><i class="bi bi-currency-exchange me-2"></i>模拟交易</a>
+                <a href="/templates/monitor.html"><i class="bi bi-bell me-2"></i>监控告警</a>
+                <a href="/templates/settings.html"><i class="bi bi-gear me-2"></i>系统设置</a>
+                <a href="#" id="logoutBtn"><i class="bi bi-box-arrow-right me-2"></i>退出登录</a>
+            </div>
+            
+            <!-- 主内容 -->
+            <div class="col-md-10 main-content">
+                <div class="d-flex justify-content-between align-items-center mb-4">
+                    <h4><i class="bi bi-currency-exchange"></i> 模拟交易</h4>
+                    <button class="btn btn-sm btn-outline-secondary" onclick="loadData()">
+                        <i class="bi bi-arrow-clockwise"></i> 刷新
+                    </button>
+                </div>
+                
+                <!-- 账户概览 -->
+                <div class="row mb-4">
+                    <div class="col-md-3">
+                        <div class="card stat-card bg-primary text-white">
+                            <div class="card-body">
+                                <div class="text-white-50">初始资金</div>
+                                <h4 id="initialCapital">-</h4>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="card stat-card bg-info text-white">
+                            <div class="card-body">
+                                <div class="text-white-50">可用现金</div>
+                                <h4 id="cash">-</h4>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="card stat-card bg-success text-white">
+                            <div class="card-body">
+                                <div class="text-white-50">总市值</div>
+                                <h4 id="portfolioValue">-</h4>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="card stat-card" id="returnCard">
+                            <div class="card-body">
+                                <div class="text-muted">总收益</div>
+                                <h4 id="totalReturn">-</h4>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- 快速交易 -->
+                <div class="card stat-card mb-4">
+                    <div class="card-body">
+                        <h5 class="card-title">快速交易</h5>
+                        <div class="row mt-3">
+                            <div class="col-md-2">
+                                <input type="text" class="form-control" id="tradeCode" placeholder="股票代码">
+                            </div>
+                            <div class="col-md-2">
+                                <input type="number" class="form-control" id="tradePrice" placeholder="价格">
+                            </div>
+                            <div class="col-md-2">
+                                <input type="number" class="form-control" id="tradeQuantity" placeholder="数量">
+                            </div>
+                            <div class="col-md-3">
+                                <button class="btn btn-success me-2" onclick="trade('buy')">
+                                    <i class="bi bi-cart-plus"></i> 买入
+                                </button>
+                                <button class="btn btn-danger" onclick="trade('sell')">
+                                    <i class="bi bi-cart-dash"></i> 卖出
+                                </button>
+                            </div>
+                            <div class="col-md-3 text-end">
+                                <button class="btn btn-warning" onclick="resetTrade()">
+                                    <i class="bi bi-arrow-counterclockwise"></i> 重置模拟
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Tab -->
+                <ul class="nav nav-tabs mb-3" id="tradeTab" role="tablist">
+                    <li class="nav-item">
+                        <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#positions">
+                            <i class="bi bi-wallet2"></i> 持仓
+                        </button>
+                    </li>
+                    <li class="nav-item">
+                        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#orders">
+                            <i class="bi bi-list-check"></i> 订单
+                        </button>
+                    </li>
+                    <li class="nav-item">
+                        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#trades">
+                            <i class="bi bi-receipt"></i> 成交
+                        </button>
+                    </li>
+                </ul>
+                
+                <!-- Tab内容 -->
+                <div class="tab-content">
+                    <!-- 持仓 -->
+                    <div class="tab-pane fade show active" id="positions">
+                        <div class="card stat-card">
+                            <div class="card-body">
+                                <div class="table-responsive">
+                                    <table class="table table-hover">
+                                        <thead>
+                                            <tr>
+                                                <th>代码</th>
+                                                <th>数量</th>
+                                                <th>成本</th>
+                                                <th>现价</th>
+                                                <th>市值</th>
+                                                <th>盈亏</th>
+                                                <th>操作</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="positionsTable">
+                                            <tr><td colspan="7" class="text-muted">暂无持仓</td></tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- 订单 -->
+                    <div class="tab-pane fade" id="orders">
+                        <div class="card stat-card">
+                            <div class="card-body">
+                                <div class="table-responsive">
+                                    <table class="table table-hover">
+                                        <thead>
+                                            <tr>
+                                                <th>日期</th>
+                                                <th>代码</th>
+                                                <th>方向</th>
+                                                <th>价格</th>
+                                                <th>数量</th>
+                                                <th>状态</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="ordersTable">
+                                            <tr><td colspan="6" class="text-muted">暂无订单</td></tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- 成交 -->
+                    <div class="tab-pane fade" id="trades">
+                        <div class="card stat-card">
+                            <div class="card-body">
+                                <div class="table-responsive">
+                                    <table class="table table-hover">
+                                        <thead>
+                                            <tr>
+                                                <th>日期</th>
+                                                <th>代码</th>
+                                                <th>方向</th>
+                                                <th>价格</th>
+                                                <th>数量</th>
+                                                <th>金额</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="tradesTable">
+                                            <tr><td colspan="6" class="text-muted">暂无成交</td></tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        const API_BASE = '';
+        const token = localStorage.getItem('token');
+        if (!token) window.location.href = '/templates/login.html';
+        
+        // 加载数据
+        async function loadData() {
+            await Promise.all([
+                loadSummary(),
+                loadPositions(),
+                loadOrders(),
+                loadTrades()
+            ]);
+        }
+        
+        // 账户摘要
+        async function loadSummary() {
+            try {
+                const res = await fetch(API_BASE + '/api/paper/summary', {
+                    headers: {'Authorization': 'Bearer ' + token}
+                });
+                const data = await res.json();
+                
+                document.getElementById('initialCapital').textContent = (data.initial_capital || 0).toLocaleString();
+                document.getElementById('cash').textContent = (data.cash || 0).toLocaleString();
+                document.getElementById('portfolioValue').textContent = (data.portfolio_value || 0).toLocaleString();
+                
+                const returnEl = document.getElementById('totalReturn');
+                const returnCard = document.getElementById('returnCard');
+                const returnRate = data.return_rate || 0;
+                
+                returnEl.textContent = `${returnRate >= 0 ? '+' : ''}${returnRate.toFixed(2)}%`;
+                
+                if (returnRate >= 0) {
+                    returnEl.className = 'profit';
+                    returnCard.className = 'card stat-card bg-danger text-white';
+                } else {
+                    returnEl.className = 'loss';
+                    returnCard.className = 'card stat-card bg-success text-white';
+                }
+            } catch (err) {
+                console.error(err);
+            }
+        }
+        
+        // 持仓
+        async function loadPositions() {
+            try {
+                const res = await fetch(API_BASE + '/api/paper/positions', {
+                    headers: {'Authorization': 'Bearer ' + token}
+                });
+                const data = await res.json();
+                
+                const tbody = document.getElementById('positionsTable');
+                if (!data.length) {
+                    tbody.innerHTML = '<tr><td colspan="7" class="text-muted">暂无持仓</td></tr>';
+                    return;
+                }
+                
+                tbody.innerHTML = data.map(p => `
+                    <tr>
+                        <td>${p.code}</td>
+                        <td>${p.quantity}</td>
+                        <td>${p.avg_cost?.toFixed(2)}</td>
+                        <td>${p.current_price?.toFixed(2)}</td>
+                        <td>${p.market_value?.toLocaleString()}</td>
+                        <td class="${p.pnl >= 0 ? 'profit' : 'loss'}">${p.pnl >= 0 ? '+' : ''}${p.pnl?.toFixed(2)} (${p.pnl_pct?.toFixed(2)}%)</td>
+                        <td>
+                            <button class="btn btn-sm btn-outline-primary" onclick="quickSell('${p.code}', ${p.current_price}, ${p.quantity})">卖出</button>
+                        </td>
+                    </tr>
+                `).join('');
+            } catch (err) {
+                console.error(err);
+            }
+        }
+        
+        // 订单
+        async function loadOrders() {
+            try {
+                const res = await fetch(API_BASE + '/api/paper/orders?limit=20', {
+                    headers: {'Authorization': 'Bearer ' + token}
+                });
+                const data = await res.json();
+                
+                const tbody = document.getElementById('ordersTable');
+                if (!data.length) {
+                    tbody.innerHTML = '<tr><td colspan="6" class="text-muted">暂无订单</td></tr>';
+                    return;
+                }
+                
+                tbody.innerHTML = data.map(o => `
+                    <tr>
+                        <td>${o.date}</td>
+                        <td>${o.code}</td>
+                        <td><span class="badge ${o.action === 'buy' ? 'bg-success' : 'bg-danger'}">${o.action === 'buy' ? '买入' : '卖出'}</span></td>
+                        <td>${o.price?.toFixed(2)}</td>
+                        <td>${o.quantity}</td>
+                        <td><span class="badge bg-success">已成交</span></td>
+                    </tr>
+                `).join('');
+            } catch (err) {
+                console.error(err);
+            }
+        }
+        
+        // 成交
+        async function loadTrades() {
+            try {
+                const res = await fetch(API_BASE + '/api/paper/trades?limit=20', {
+                    headers: {'Authorization': 'Bearer ' + token}
+                });
+                const data = await res.json();
+                
+                const tbody = document.getElementById('tradesTable');
+                if (!data.length) {
+                    tbody.innerHTML = '<tr><td colspan="6" class="text-muted">暂无成交</td></tr>';
+                    return;
+                }
+                
+                tbody.innerHTML = data.map(t => `
+                    <tr>
+                        <td>${t.date}</td>
+                        <td>${t.code}</td>
+                        <td><span class="badge ${t.action === 'buy' ? 'bg-success' : 'bg-danger'}">${t.action === 'buy' ? '买入' : '卖出'}</span></td>
+                        <td>${t.price?.toFixed(2)}</td>
+                        <td>${t.quantity}</td>
+                        <td>${t.amount?.toLocaleString()}</td>
+                    </tr>
+                `).join('');
+            } catch (err) {
+                console.error(err);
+            }
+        }
+        
+        // 交易
+        async function trade(action) {
+            const code = document.getElementById('tradeCode').value;
+            const price = parseFloat(document.getElementById('tradePrice').value);
+            const quantity = parseInt(document.getElementById('tradeQuantity').value);
+            
+            if (!code || !price || !quantity) {
+                alert('请填写完整交易信息');
+                return;
+            }
+            
+            try {
+                const endpoint = action === 'buy' ? '/api/paper/buy' : '/api/paper/sell';
+                const res = await fetch(API_BASE + endpoint, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': 'Bearer ' + token,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ code, price, quantity })
+                });
+                
+                const data = await res.json();
+                
+                if (res.ok) {
+                    alert(`${action === 'buy' ? '买入' : '卖出'}成功！\n订单ID: ${data.order_id}\n现金: ${data.cash}`);
+                    loadData();
+                } else {
+                    alert('交易失败: ' + (data.detail || data.error));
+                }
+            } catch (err) {
+                alert('交易失败');
+            }
+        }
+        
+        // 快捷卖出
+        function quickSell(code, price, quantity) {
+            document.getElementById('tradeCode').value = code;
+            document.getElementById('tradePrice').value = price;
+            document.getElementById('tradeQuantity').value = quantity;
+            trade('sell');
+        }
+        
+        // 重置模拟
+        async function resetTrade() {
+            if (!confirm('确定要重置模拟交易吗？所有持仓和记录将被清除！')) return;
+            
+            try {
+                const res = await fetch(API_BASE + '/api/paper/reset', {
+                    method: 'POST',
+                    headers: {'Authorization': 'Bearer ' + token}
+                });
+                
+                alert('模拟交易已重置');
+                loadData();
+            } catch (err) {
+                alert('重置失败');
+            }
+        }
+        
+        // 初始化
+        loadData();
+        
+        // 退出登录
+        document.getElementById('logoutBtn').addEventListener('click', async () => {
+            await fetch(API_BASE + '/api/auth/logout', {
+                method: 'POST',
+                headers: {'Authorization': 'Bearer ' + token}
+            });
+            localStorage.clear();
+            window.location.href = '/templates/login.html';
+        });
+    </script>
+</body>
+</html>

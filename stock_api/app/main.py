@@ -8,7 +8,7 @@ from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
 import os
 
-from app.routers import auth, stocks, admin, admin_extended, positions, account
+from app.routers import auth, stocks, admin, admin_extended, positions, account, paper_trade
 from app.middleware import AuthMiddleware
 from app.utils.db import init_db
 from app.config import CORS_ORIGINS
@@ -44,6 +44,7 @@ app.include_router(admin_extended.router)
 app.include_router(admin.router)
 app.include_router(positions.router)
 app.include_router(account.router)
+app.include_router(paper_trade.router)
 
 # 静态文件和模板
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
