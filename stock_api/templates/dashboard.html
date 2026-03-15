@@ -16,6 +16,7 @@
         .stat-card:hover { transform: translateY(-2px); }
         .main-content { margin-left: 220px; padding: 20px; }
         .quick-actions .btn { border-radius: 8px; }
+        .loading { opacity: 0.5; pointer-events: none; }
     </style>
 </head>
 <body>
@@ -41,9 +42,12 @@
             <div class="col-md-10 main-content">
                 <div class="d-flex justify-content-between align-items-center mb-4">
                     <h4><i class="bi bi-speedometer2"></i> 仪表盘</h4>
-                    <button class="btn btn-sm btn-outline-secondary" onclick="loadDashboard()">
-                        <i class="bi bi-arrow-clockwise"></i> 刷新
-                    </button>
+                    <div>
+                        <button class="btn btn-sm btn-outline-secondary me-2" onclick="loadDashboard(true)">
+                            <i class="bi bi-arrow-clockwise"></i> 刷新
+                        </button>
+                        <span class="badge bg-secondary" id="cacheStatus"></span>
+                    </div>
                 </div>
                 
                 <!-- 快捷操作 -->
@@ -157,6 +161,8 @@
 
     <script>
         const API_BASE = '';
+        const CACHE_KEY = 'dashboard_cache';
+        const CACHE_TTL = 5 * 60 * 1000; // 5分钟缓存
         
         // 检查登录
         const token = localStorage.getItem('token');
@@ -175,75 +181,137 @@
             } catch (err) {}
         }
         
-        // 获取统计数据
-        async function loadDashboard() {
+        // 缓存管理
+        function getCache(key) {
             try {
-                // 数据质量
-                const qualityRes = await fetch(API_BASE + '/api/admin/data/quality', {
-                    headers: {'Authorization': 'Bearer ' + token}
-                });
-                if (!qualityRes.ok) { alert('请重新登录'); window.location.href = '/templates/login.html'; }
+                const cached = localStorage.getItem(key);
+                if (!cached) return null;
                 
-                const quality = await qualityRes.json();
+                const { data, timestamp } = JSON.parse(cached);
+                if (Date.now() - timestamp < CACHE_TTL) {
+                    return data;
+                }
+            } catch (e) {}
+            return null;
+        }
+        
+        function setCache(key, data) {
+            try {
+                localStorage.setItem(key, JSON.stringify({
+                    data,
+                    timestamp: Date.now()
+                }));
+            } catch (e) {}
+        }
+        
+        // 并行请求获取所有数据
+        async function loadDashboard(forceRefresh = false) {
+            const mainContent = document.querySelector('.main-content');
+            mainContent.classList.add('loading');
+            
+            // 尝试从缓存获取
+            const cached = !forceRefresh ? getCache(CACHE_KEY) : null;
+            
+            if (cached) {
+                document.getElementById('cacheStatus').textContent = '缓存';
+                renderDashboard(cached);
+                mainContent.classList.remove('loading');
+                return;
+            }
+            
+            document.getElementById('cacheStatus').textContent = '加载中...';
+            
+            try {
+                // 并行请求 - 优化性能
+                const [qualityRes, syncRes, alertsRes, sysRes] = await Promise.all([
+                    fetch(API_BASE + '/api/admin/data/quality', {
+                        headers: {'Authorization': 'Bearer ' + token}
+                    }),
+                    fetch(API_BASE + '/api/admin/data/sync/status', {
+                        headers: {'Authorization': 'Bearer ' + token}
+                    }),
+                    fetch(API_BASE + '/api/admin/monitor/alerts', {
+                        headers: {'Authorization': 'Bearer ' + token}
+                    }),
+                    fetch(API_BASE + '/api/admin/settings/info', {
+                        headers: {'Authorization': 'Bearer ' + token}
+                    })
+                ]);
                 
-                document.getElementById('stockCount').textContent = quality.stock_count || 0;
-                document.getElementById('recordCount').textContent = (quality.total_records || 0).toLocaleString();
-                document.getElementById('validRate').textContent = (quality.valid_rate || 0) + '%';
-                
-                if (quality.date_range && quality.date_range.start) {
-                    document.getElementById('dateRange').textContent = 
-                        quality.date_range.start + ' ~ ' + quality.date_range.end;
-                } else {
-                    document.getElementById('dateRange').textContent = '暂无数据';
+                if (!qualityRes.ok) {
+                    alert('请重新登录');
+                    window.location.href = '/templates/login.html';
+                    return;
                 }
                 
-                // 同步状态
-                const syncRes = await fetch(API_BASE + '/api/admin/data/sync/status', {
-                    headers: {'Authorization': 'Bearer ' + token}
-                });
-                const sync = await syncRes.json();
+                const [quality, sync, alerts, sysInfo] = await Promise.all([
+                    qualityRes.json(),
+                    syncRes.json(),
+                    alertsRes.json(),
+                    sysRes.json()
+                ]);
                 
-                const statusEl = document.getElementById('syncStatus');
-                statusEl.textContent = sync.status === 'running' ? '运行中' : '空闲';
-                statusEl.className = 'badge ' + (sync.status === 'running' ? 'bg-success' : 'bg-secondary');
+                const data = { quality, sync, alerts, sysInfo };
                 
-                const progress = sync.progress || 0;
-                const progressBar = document.getElementById('syncProgressBar');
-                progressBar.style.width = progress + '%';
-                progressBar.textContent = progress + '%';
+                // 保存到缓存
+                setCache(CACHE_KEY, data);
+                document.getElementById('cacheStatus').textContent = '最新';
                 
-                document.getElementById('syncProgress').textContent = 
-                    (sync.completed_stocks || 0) + ' / ' + (sync.total_stocks || 0);
-                document.getElementById('syncCurrent').textContent = sync.current_stock || '-';
-                
-                // 告警
-                const alertsRes = await fetch(API_BASE + '/api/admin/monitor/alerts', {
-                    headers: {'Authorization': 'Bearer ' + token}
-                });
-                const alerts = await alertsRes.json();
-                
-                const alertsList = document.getElementById('alertsList');
-                const totalAlerts = alerts.price_alerts?.length || 0 + alerts.volume_alerts?.length || 0;
-                
-                if (totalAlerts > 0) {
-                    alertsList.innerHTML = alerts.price_alerts?.slice(0, 3).map(a => 
-                        '<div class="alert alert-danger py-2"><i class="bi bi-exclamation-triangle"></i> ' + 
-                        a.ts_code + ': ' + a.change_pct?.toFixed(2) + '%</div>'
-                    ).join('') || '';
-                } else {
-                    alertsList.innerHTML = '<p class="text-muted"><i class="bi bi-check-circle"></i> 暂无告警</p>';
-                }
-                
-                // 系统信息
-                const sysRes = await fetch(API_BASE + '/api/admin/settings/info', {
-                    headers: {'Authorization': 'Bearer ' + token}
-                });
-                const sysInfo = await sysRes.json();
-                document.getElementById('sysVersion').textContent = sysInfo.version || '1.1.0';
+                renderDashboard(data);
                 
             } catch (err) {
                 console.error(err);
+                alert('加载失败，请刷新重试');
+            } finally {
+                mainContent.classList.remove('loading');
             }
+        }
+        
+        // 渲染数据
+        function renderDashboard(data) {
+            const { quality, sync, alerts, sysInfo } = data;
+            
+            // 统计数据
+            document.getElementById('stockCount').textContent = quality.stock_count || 0;
+            document.getElementById('recordCount').textContent = (quality.total_records || 0).toLocaleString();
+            document.getElementById('validRate').textContent = (quality.valid_rate || 0) + '%';
+            
+            if (quality.date_range && quality.date_range.start) {
+                document.getElementById('dateRange').textContent = 
+                    quality.date_range.start + ' ~ ' + quality.date_range.end;
+            } else {
+                document.getElementById('dateRange').textContent = '暂无数据';
+            }
+            
+            // 同步状态
+            const statusEl = document.getElementById('syncStatus');
+            statusEl.textContent = sync.status === 'running' ? '运行中' : '空闲';
+            statusEl.className = 'badge ' + (sync.status === 'running' ? 'bg-success' : 'bg-secondary');
+            
+            const progress = sync.progress || 0;
+            const progressBar = document.getElementById('syncProgressBar');
+            progressBar.style.width = progress + '%';
+            progressBar.textContent = progress + '%';
+            
+            document.getElementById('syncProgress').textContent = 
+                (sync.completed_stocks || 0) + ' / ' + (sync.total_stocks || 0);
+            document.getElementById('syncCurrent').textContent = sync.current_stock || '-';
+            
+            // 告警
+            const alertsList = document.getElementById('alertsList');
+            const totalAlerts = (alerts.price_alerts?.length || 0) + (alerts.volume_alerts?.length || 0);
+            
+            if (totalAlerts > 0) {
+                alertsList.innerHTML = alerts.price_alerts?.slice(0, 3).map(a => 
+                    '<div class="alert alert-danger py-2"><i class="bi bi-exclamation-triangle"></i> ' + 
+                    a.ts_code + ': ' + a.change_pct?.toFixed(2) + '%</div>'
+                ).join('') || '';
+            } else {
+                alertsList.innerHTML = '<p class="text-muted"><i class="bi bi-check-circle"></i> 暂无告警</p>';
+            }
+            
+            // 系统信息
+            document.getElementById('sysVersion').textContent = sysInfo.version || '1.1.0';
         }
         
         // 启动同步
@@ -255,7 +323,7 @@
                 });
                 const data = await res.json();
                 alert(data.message || '同步已启动');
-                loadDashboard();
+                loadDashboard(true); // 强制刷新
             } catch (err) {
                 alert('启动失败');
             }
