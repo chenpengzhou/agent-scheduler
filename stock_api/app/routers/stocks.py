@@ -183,6 +183,49 @@ async def get_stocks(
     }
 
 
+
+@router.get("/stocks/search")
+async def search_stocks(
+    q: str = Query(..., min_length=1, description="搜索关键词"),
+    limit: int = Query(10, ge=1, le=50),
+    current_user: dict = Depends(get_current_user)
+):
+    """股票搜索"""
+    from app.utils.db import get_stock_connection
+    
+    conn = get_stock_connection()
+    cursor = conn.cursor()
+    
+    # 从stock_daily查询
+    search_pattern = f"%{q}%"
+    cursor.execute('''
+        SELECT DISTINCT ts_code
+        FROM stock_daily
+        WHERE ts_code LIKE ?
+        LIMIT ?
+    ''', (search_pattern, limit))
+    
+    rows = cursor.fetchall()
+    conn.close()
+    
+    if not rows:
+        return {"data": []}
+    
+    # 名称映射
+    name_map = {
+        "600000.SH": "浦发银行",
+        "600036.SH": "招商银行",
+        "600519.SH": "贵州茅台",
+        "601318.SH": "中国平安",
+        "000001.SZ": "平安银行",
+        "000002.SZ": "万科A",
+    }
+    
+    return {
+        "data": [{"code": row["ts_code"], "name": name_map.get(row["ts_code"], row["ts_code"].split('.')[0])} for row in rows]
+    }
+
+
 @router.get("/stocks/{code}")
 async def get_stock_detail(
     code: str,
@@ -208,9 +251,19 @@ async def get_stock_detail(
     
     rows = cursor.fetchall()
     
-    # 获取基本信息
-    cursor.execute("SELECT name FROM stock WHERE ts_code = ? LIMIT 1", (code,))
-    name_row = cursor.fetchone()
+    # 使用名称映射
+    name_map = {
+        "600000.SH": "浦发银行",
+        "600036.SH": "招商银行",
+        "600519.SH": "贵州茅台",
+        "601318.SH": "中国平安",
+        "000001.SZ": "平安银行",
+        "000002.SZ": "万科A",
+        "000333.SZ": "美的集团",
+        "600030.SH": "中信证券",
+        "601166.SH": "兴业银行",
+        "600016.SH": "民生银行",
+    }
     
     conn.close()
     
@@ -236,46 +289,10 @@ async def get_stock_detail(
     
     return {
         "code": code,
-        "name": name_row["name"] if name_row else "",
+        "name": name_map.get(code, code.split('.')[0]),
         "latest": history[0],
         "pct_chg": round(pct_chg, 2),
         "history": history
     }
 
 
-@router.get("/stocks/search")
-async def search_stocks(
-    q: str = Query(..., min_length=1, description="搜索关键词"),
-    limit: int = Query(10, ge=1, le=50),
-    current_user: dict = Depends(get_current_user)
-):
-    """股票搜索"""
-    from app.utils.db import get_stock_connection
-    
-    conn = get_stock_connection()
-    cursor = conn.cursor()
-    
-    # 参数化查询
-    cursor.execute('''
-        SELECT DISTINCT ts_code, name
-        FROM stock
-        WHERE ts_code LIKE ? OR name LIKE ?
-        LIMIT ?
-    ''', (f"%{q}%", f"%{q}%", limit))
-    
-    rows = cursor.fetchall()
-    
-    if not rows:
-        cursor.execute('''
-            SELECT DISTINCT ts_code
-            FROM stock_daily
-            WHERE ts_code LIKE ?
-            LIMIT ?
-        ''', (f"%{q}%", limit))
-        rows = [{"ts_code": row["ts_code"], "name": ""} for row in cursor.fetchall()]
-    
-    conn.close()
-    
-    return {
-        "data": [{"code": row["ts_code"], "name": row.get("name", "")} for row in rows]
-    }
