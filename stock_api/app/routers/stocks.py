@@ -138,48 +138,48 @@ async def get_stocks(
     conn = get_stock_connection()
     cursor = conn.cursor()
     
-    # 参数化查询
+    # 从stock_daily表获取列表
     if search:
-        where_clause = "WHERE ts_code LIKE ? OR name LIKE ?"
-        params = [f"%{search}%", f"%{search}%"]
+        where_clause = "WHERE ts_code LIKE ?"
+        params = [f"%{search}%"]
     else:
         where_clause = ""
         params = []
     
     # 获取总数
-    try:
-        cursor.execute(f"SELECT COUNT(DISTINCT ts_code) as total FROM stock {where_clause}", params)
-        total = cursor.fetchone()["total"]
-    except:
-        cursor.execute("SELECT COUNT(DISTINCT ts_code) as total FROM stock_daily")
-        total = cursor.fetchone()["total"]
+    cursor.execute(f"SELECT COUNT(DISTINCT ts_code) as total FROM stock_daily {where_clause}", params)
+    total = cursor.fetchone()["total"]
     
-    # 获取列表 - 参数化
+    # 获取列表
     offset = (page - 1) * page_size
     
-    try:
-        query = f'''
-            SELECT DISTINCT ts_code, name
-            FROM stock
-            {where_clause}
-            ORDER BY ts_code
-            LIMIT ? OFFSET ?
-        '''
-        cursor.execute(query, params + [page_size, offset])
-        rows = cursor.fetchall()
-    except:
-        query = "SELECT DISTINCT ts_code FROM stock_daily ORDER BY ts_code LIMIT ? OFFSET ?"
-        cursor.execute(query, (page_size, offset))
-        rows = [{"ts_code": row["ts_code"], "name": ""} for row in cursor.fetchall()]
+    query = f'''
+        SELECT DISTINCT ts_code
+        FROM stock_daily {where_clause}
+        ORDER BY ts_code
+        LIMIT ? OFFSET ?
+    '''
+    cursor.execute(query, params + [page_size, offset])
+    rows = cursor.fetchall()
     
     conn.close()
+    
+    # 模拟股票名称映射
+    name_map = {
+        "600000.SH": "浦发银行",
+        "600036.SH": "招商银行",
+        "600519.SH": "贵州茅台",
+        "601318.SH": "中国平安",
+        "000001.SZ": "平安银行",
+        "000002.SZ": "万科A",
+    }
     
     return {
         "page": page,
         "page_size": page_size,
         "total": total or 0,
         "pages": (total + page_size - 1) // page_size if total else 0,
-        "data": [{"code": row["ts_code"], "name": row.get("name", "")} for row in rows]
+        "data": [{"code": row["ts_code"], "name": name_map.get(row["ts_code"], row["ts_code"].split('.')[0])} for row in rows]
     }
 
 

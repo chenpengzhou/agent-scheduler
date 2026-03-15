@@ -37,11 +37,11 @@ app.add_middleware(
 # 认证中间件
 app.add_middleware(AuthMiddleware)
 
-# 注册路由
+# 注册路由 - admin_extended要在admin之前，避免路由冲突
 app.include_router(auth.router)
 app.include_router(stocks.router)
-app.include_router(admin.router)
 app.include_router(admin_extended.router)
+app.include_router(admin.router)
 app.include_router(positions.router)
 app.include_router(account.router)
 
