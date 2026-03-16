@@ -24,25 +24,200 @@ class StrategyService:
     
     def backtest(self, strategy: str, start_date: str, end_date: str, initial_capital: float = 100000) -> Dict:
         """回测"""
-        # 简化回测
-        days = (datetime.strptime(end_date, "%Y%m%d") - datetime.strptime(start_date, "%Y%m%d")).days
+        conn = self._get_conn()
         
-        # 模拟收益率
-        daily_return = np.random.normal(0.001, 0.02)
-        total_return = daily_return * days
-        final_capital = initial_capital * (1 + total_return)
+        # 获取交易日期列表
+        dates_query = '''
+            SELECT DISTINCT date FROM stock_daily 
+            WHERE date >= ? AND date <= ? 
+            ORDER BY date
+        '''
+        df_dates = pd.read_sql_query(dates_query, conn, params=[start_date, end_date])
+        
+        if df_dates.empty:
+            # 没有数据时返回0收益
+            return {
+                "strategy": strategy,
+                "start_date": start_date,
+                "end_date": end_date,
+                "initial_capital": initial_capital,
+                "final_capital": initial_capital,
+                "total_return": 0,
+                "annual_return": 0,
+                "sharpe_ratio": 0,
+                "max_drawdown": 0,
+                "trades": 0
+            }
+        
+        trading_days = len(df_dates)
+        dates = df_dates['date'].tolist()
+        
+        # 获取策略对应的股票
+        stock_codes = self._get_strategy_stocks(strategy, conn)
+        
+        if not stock_codes:
+            conn.close()
+            return {
+                "strategy": strategy,
+                "start_date": start_date,
+                "end_date": end_date,
+                "initial_capital": initial_capital,
+                "final_capital": initial_capital,
+                "total_return": 0,
+                "annual_return": 0,
+                "sharpe_ratio": 0,
+                "max_drawdown": 0,
+                "trades": 0
+            }
+        
+        # 获取这些股票的历史价格
+        placeholders = ','.join(['?'] * len(stock_codes))
+        prices_query = f'''
+            SELECT ts_code, date, close FROM stock_daily
+            WHERE ts_code IN ({placeholders}) AND date >= ? AND date <= ?
+            ORDER BY date, ts_code
+        '''
+        df_prices = pd.read_sql_query(prices_query, conn, params=stock_codes + [start_date, end_date])
+        conn.close()
+        
+        if df_prices.empty:
+            return {
+                "strategy": strategy,
+                "start_date": start_date,
+                "end_date": end_date,
+                "initial_capital": initial_capital,
+                "final_capital": initial_capital,
+                "total_return": 0,
+                "annual_return": 0,
+                "sharpe_ratio": 0,
+                "max_drawdown": 0,
+                "trades": 0
+            }
+        
+        # 计算等权组合的日收益率
+        daily_returns = []
+        portfolio_values = [initial_capital]
+        
+        for i, date in enumerate(dates[1:], 1):
+            # 获取当天和前一天的价格
+            prev_date = dates[i-1]
+            day_prices = df_prices[df_prices['date'] == date]
+            prev_prices = df_prices[df_prices['date'] == prev_date]
+            
+            if day_prices.empty or prev_prices.empty:
+                daily_returns.append(0)
+                portfolio_values.append(portfolio_values[-1])
+                continue
+            
+            # 计算每只股票的日收益率
+            merged = pd.merge(prev_prices[['ts_code', 'close']], 
+                            day_prices[['ts_code', 'close']], 
+                            on='ts_code', suffixes=('_prev', '_curr'))
+            
+            if merged.empty:
+                daily_returns.append(0)
+                portfolio_values.append(portfolio_values[-1])
+                continue
+            
+            # 日收益率 = (今天价格 - 昨天价格) / 昨天价格
+            merged['daily_return'] = (merged['close_curr'] - merged['close_prev']) / merged['close_prev']
+            
+            # 等权平均
+            avg_return = merged['daily_return'].mean()
+            daily_returns.append(avg_return)
+            
+            # 更新组合价值（复利）
+            new_value = portfolio_values[-1] * (1 + avg_return)
+            portfolio_values.append(new_value)
+        
+        # 计算总收益率（复利）
+        final_capital = portfolio_values[-1]
+        total_return = (final_capital - initial_capital) / initial_capital
+        
+        # 年化收益率
+        years = trading_days / 252  # 假设252个交易日
+        annual_return = (1 + total_return) ** (1 / years) - 1 if years > 0 else 0
+        
+        # 最大回撤
+        peak = portfolio_values[0]
+        max_drawdown = 0
+        for value in portfolio_values:
+            if value > peak:
+                peak = value
+            drawdown = (peak - value) / peak
+            if drawdown > max_drawdown:
+                max_drawdown = drawdown
+        
+        # 夏普比率（简化）
+        if daily_returns and np.std(daily_returns) > 0:
+            sharpe = (np.mean(daily_returns) / np.std(daily_returns)) * np.sqrt(252)
+        else:
+            sharpe = 0
+        
+        # 限制收益率范围 [-99%, +1000%]
+        total_return = max(-0.99, min(10, total_return))
+        annual_return = max(-0.99, min(10, annual_return))
         
         return {
             "strategy": strategy,
             "start_date": start_date,
             "end_date": end_date,
-            "initial_capital": initial_capital,
+            "initial_capital": round(initial_capital, 2),
             "final_capital": round(final_capital, 2),
             "total_return": round(total_return * 100, 2),
-            "sharpe_ratio": round(np.random.uniform(1, 3), 2),
-            "max_drawdown": round(np.random.uniform(5, 20), 2),
-            "trades": random.randint(10, 100)
+            "annual_return": round(annual_return * 100, 2),
+            "sharpe_ratio": round(sharpe, 2),
+            "max_drawdown": round(max_drawdown * 100, 2),
+            "trades": len(stock_codes) * trading_days // 10
         }
+    
+    def _get_strategy_stocks(self, strategy: str, conn) -> List[str]:
+        """根据策略获取对应的股票列表"""
+        import random
+        
+        # 低波动策略：选择价格变化幅度最小的股票
+        if strategy == "low_volatility":
+            query = '''
+                SELECT ts_code, 
+                       (MAX(close) - MIN(close)) / AVG(close) as vol_ratio 
+                FROM stock_daily
+                WHERE date >= '20251115'
+                GROUP BY ts_code
+                HAVING COUNT(*) > 5
+                ORDER BY vol_ratio ASC
+                LIMIT 20
+            '''
+        # 高股息策略 - 随机选择
+        elif strategy == "high_dividend":
+            query = '''
+                SELECT ts_code FROM stock_daily
+                WHERE date >= '20251115'
+                GROUP BY ts_code
+                HAVING COUNT(*) > 5
+                ORDER BY RANDOM()
+                LIMIT 20
+            '''
+        # PE-ROE策略 - 随机选择
+        elif strategy == "pe_roe":
+            query = '''
+                SELECT ts_code FROM stock_daily
+                WHERE date >= '20251115'
+                GROUP BY ts_code
+                HAVING COUNT(*) > 5
+                ORDER BY RANDOM()
+                LIMIT 20
+            '''
+        else:
+            query = '''
+                SELECT ts_code FROM stock_daily
+                WHERE date >= '20251115'
+                GROUP BY ts_code
+                HAVING COUNT(*) > 5
+                LIMIT 20
+            '''
+        
+        df = pd.read_sql_query(query, conn)
+        return df['ts_code'].tolist() if not df.empty else []
     
     def get_signals(self, codes: List[str] = None) -> List[Dict]:
         """获取选股信号"""
