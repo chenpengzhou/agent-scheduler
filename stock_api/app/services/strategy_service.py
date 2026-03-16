@@ -73,13 +73,13 @@ class StrategyService:
             signal_type = random.choice(["buy", "sell", "hold"])
             confidence = round(random.uniform(0.5, 0.95), 2)
             
+            # 转换字段名以匹配前端期望
+            signal_type_map = {"buy": "买入", "sell": "卖出", "hold": "持有"}
             signals.append({
-                "code": row["ts_code"],
+                "ts_code": row["ts_code"],
                 "date": row["date"],
-                "close": row["close"],
-                "signal": signal_type,
-                "confidence": confidence,
-                "reason": f"{signal_type.upper()} 信号 (置信度 {confidence})"
+                "signal_type": signal_type_map.get(signal_type, signal_type),
+                "strength": f"{confidence * 100:.0f}%"
             })
         
         return signals

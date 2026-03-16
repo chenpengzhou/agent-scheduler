@@ -116,15 +116,29 @@
                 const res = await fetch(API_BASE + '/api/admin/data/quality', {
                     headers: {'Authorization': 'Bearer ' + token}
                 });
+                
+                if (!res.ok) {
+                    document.getElementById('totalRecords').textContent = '无法加载';
+                    return;
+                }
+                
                 const data = await res.json();
                 
                 document.getElementById('totalRecords').textContent = (data.total_records || 0).toLocaleString();
                 document.getElementById('stockCount').textContent = data.stock_count || 0;
                 document.getElementById('validRate').textContent = (data.valid_rate || 0) + '%';
-                document.getElementById('dateRange').textContent = 
-                    (data.date_range?.start || '-') + ' ~ ' + (data.date_range?.end || '-');
+                
+                if (data.date_range && data.date_range.start) {
+                    document.getElementById('dateRange').textContent = data.date_range.start + ' ~ ' + data.date_range.end;
+                } else {
+                    document.getElementById('dateRange').textContent = '暂无数据';
+                }
             } catch (err) {
                 console.error(err);
+                document.getElementById('totalRecords').textContent = '加载失败';
+                document.getElementById('stockCount').textContent = '-';
+                document.getElementById('validRate').textContent = '-';
+                document.getElementById('dateRange').textContent = '-';
             }
         }
         
