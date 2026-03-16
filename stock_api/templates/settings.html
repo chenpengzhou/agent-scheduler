@@ -8,9 +8,10 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css" rel="stylesheet">
     <style>
         body { background: #f5f7fa; }
-        .sidebar { background: #343a40; min-height: 100vh; }
+        .sidebar { background: #343a40; min-height: 100vh; position: fixed; width: 220px; }
         .sidebar a { color: #adb5bd; text-decoration: none; padding: 12px 20px; display: block; }
         .sidebar a:hover, .sidebar a.active { background: #495057; color: white; }
+        .main-content { margin-left: 220px; padding: 20px; }
     </style>
 </head>
 <body>
@@ -18,20 +19,20 @@
         <div class="row">
             <div class="col-md-2 sidebar p-0">
                 <div class="p-3 text-white text-center border-bottom border-secondary">
-                    <h5>股票管理后台</h5>
+                    <h5><i class="bi bi-graph-up-arrow"></i> 股票后台</h5>
                 </div>
-                <a href="/templates/dashboard.html"><i class="bi bi-grid me-2"></i>数据总览</a>
+                <a href="/templates/dashboard.html"><i class="bi bi-grid me-2"></i>仪表盘</a>
                 <a href="/templates/sync.html"><i class="bi bi-arrow-repeat me-2"></i>同步控制</a>
                 <a href="/templates/stocks.html"><i class="bi bi-collection me-2"></i>股票列表</a>
-                <a href="/templates/factors.html"><i class="bi bi-graph-up me-2"></i>因子展示</a>
-                <a href="/templates/data_management.html"><i class="bi bi-database me-2"></i>数据管理</a>
+                <a href="/templates/factors.html"><i class="bi bi-calculator me-2"></i>因子计算</a>
                 <a href="/templates/strategy.html"><i class="bi bi-lightning me-2"></i>选股策略</a>
+                <a href="/templates/data_management.html"><i class="bi bi-database me-2"></i>数据管理</a>
                 <a href="/templates/monitor.html"><i class="bi bi-bell me-2"></i>监控告警</a>
                 <a href="/templates/settings.html" class="active"><i class="bi bi-gear me-2"></i>系统设置</a>
                 <a href="#" id="logoutBtn"><i class="bi bi-box-arrow-right me-2"></i>退出登录</a>
             </div>
             
-            <div class="col-md-10 p-4">
+            <div class="col-md-10 main-content">
                 <h4 class="mb-4">系统设置</h4>
                 
                 <!-- 系统信息 -->

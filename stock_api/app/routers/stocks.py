@@ -42,7 +42,7 @@ async def get_quote(
     # 参数化查询
     try:
         cursor.execute('''
-            SELECT ts_code, date, open, high, low, close, vol, volume, amount
+            SELECT ts_code, date, open, high, low, close, volume, amount
             FROM stock_daily
             WHERE ts_code = ? AND date = ?
         ''', (code, date))
@@ -58,7 +58,7 @@ async def get_quote(
                 "high": float(row["high"] or 0),
                 "low": float(row["low"] or 0),
                 "close": float(row["close"] or 0),
-                "volume": float(row["vol"] or row["volume"] or 0),
+                "volume": float(row["volume"] or 0),
                 "amount": float(row["amount"] or 0),
                 "source": "local"
             }
@@ -92,7 +92,7 @@ async def get_quotes(
     # 使用 IN 语句批量查询
     placeholders = ','.join(['?'] * len(code_list))
     query = f'''
-        SELECT ts_code, date, open, high, low, close, vol, volume, amount
+        SELECT ts_code, date, open, high, low, close, volume, amount
         FROM stock_daily
         WHERE ts_code IN ({placeholders}) AND date = ?
     '''
@@ -110,7 +110,7 @@ async def get_quotes(
                 "high": float(row["high"] or 0),
                 "low": float(row["low"] or 0),
                 "close": float(row["close"] or 0),
-                "volume": float(row["vol"] or row["volume"] or 0),
+                "volume": float(row["volume"] or 0),
                 "amount": float(row["amount"] or 0),
                 "source": "local"
             })
