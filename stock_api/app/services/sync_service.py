@@ -104,7 +104,7 @@ class StockSyncService:
         self.is_running = True
         self._run_sync_task(task_id, stocks_to_sync)
         
-        logger.info(f"同步任务已启动, 任务ID: {task_id, 股票数: {total}")
+        logger.info(f"同步任务已启动, 任务ID: {task_id}, 股票数: {total}")
         
         return {"message": "同步已启动", "task_id": task_id, "total": total}
     
@@ -133,7 +133,7 @@ class StockSyncService:
                 # 模拟数据获取（实际应该调用 akshare 等数据源）
                 data = self._fetch_stock_data(stock)
                 
-                if data:
+                if data is not None and not data.empty:
                     # 写入数据库
                     self._save_stock_data(conn, stock, data)
                     completed += 1
