@@ -48,31 +48,20 @@ class DataManager:
         conn.close()
         return {"status": "idle", "total_stocks": 0, "completed_stocks": 0}
     
-    def start_sync(self) -> Dict:
+    def start_sync(self, force_full: bool = False) -> Dict:
         """启动同步"""
-        conn = self._get_conn()
-        cursor = conn.cursor()
-        
-        # 获取股票数量
-        try:
-            cursor.execute("SELECT COUNT(DISTINCT ts_code) as cnt FROM stock_daily")
-            total = cursor.fetchone()["cnt"]
-        except:
-            total = 5000
-        
-        now = datetime.now().isoformat()
-        
-        # 插入新任务
-        cursor.execute('''
-            INSERT INTO sync_tasks (status, total_stocks, started_at)
-            VALUES (?, ?, ?)
-        ''', ("running", total, now))
-        
-        conn.commit()
-        task_id = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
-        conn.close()
-        
-        return {"message": "同步已启动", "task_id": task_id}
+        from app.services.sync_service import sync_service
+        return sync_service.start_sync(force_full)
+    
+    def stop_sync(self) -> Dict:
+        """停止同步"""
+        from app.services.sync_service import sync_service
+        return sync_service.stop_sync()
+    
+    def get_sync_logs(self, limit: int = 100) -> List:
+        """获取同步日志"""
+        from app.services.sync_service import sync_service
+        return sync_service.get_sync_logs(limit)
     
     def stop_sync(self) -> Dict:
         """停止同步"""
