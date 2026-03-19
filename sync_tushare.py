@@ -85,6 +85,16 @@ def sync_stock_daily(pro, trade_date: str):
                 # 获取日线数据
                 daily_df = pro.daily(ts_code=ts_code, start_date=trade_date, end_date=trade_date)
                 
+                # 只保留数据库需要的字段（先选择再重命名）
+                keep_cols = ['ts_code', 'trade_date', 'open', 'high', 'low', 'close', 'vol', 'amount']
+                daily_df = daily_df[[c for c in keep_cols if c in daily_df.columns]]
+                
+                # 转换字段名 Tushare -> 数据库
+                daily_df = daily_df.rename(columns={
+                    'trade_date': 'date',
+                    'vol': 'volume'
+                })
+                
                 if daily_df is not None and not daily_df.empty:
                     # 写入数据库
                     conn = sqlite3.connect(DB_PATH)
