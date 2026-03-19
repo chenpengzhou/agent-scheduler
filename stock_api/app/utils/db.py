@@ -5,7 +5,7 @@
 import sqlite3
 import os
 import time
-from functools import lru_cache
+from functools import lru_cache, wraps
 from typing import Optional
 
 # SQLite配置
@@ -13,6 +13,24 @@ STOCK_DB_PATH = os.environ.get('STOCK_DB_PATH', os.path.expanduser("~/.openclaw/
 
 # 缓存配置
 CACHE_TTL = 300  # 5分钟缓存
+
+# SQLite重试装饰器
+def with_retry(retries=3, delay=0.5):
+    """数据库操作重试装饰器"""
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            for attempt in range(retries):
+                try:
+                    return func(*args, **kwargs)
+                except sqlite3.OperationalError as e:
+                    if 'locked' in str(e) and attempt < retries - 1:
+                        time.sleep(delay * (attempt + 1))
+                        continue
+                    raise
+            return func(*args, **kwargs)
+        return wrapper
+    return decorator
 
 # 简单内存缓存
 class SimpleCache:
@@ -49,14 +67,15 @@ cache = SimpleCache()
 def get_connection(db_path: str = None) -> sqlite3.Connection:
     """获取数据库连接"""
     path = db_path or STOCK_DB_PATH
-    conn = sqlite3.connect(path, check_same_thread=False)
+    conn = sqlite3.connect(path, check_same_thread=False, timeout=30)
     conn.row_factory = sqlite3.Row
     
-    # 启用WAL模式
+    # SQLite优化：WAL模式 + 超时设置
     try:
         conn.execute('PRAGMA journal_mode=WAL')
         conn.execute('PRAGMA synchronous=NORMAL')
         conn.execute('PRAGMA cache_size=10000')
+        conn.execute('PRAGMA busy_timeout=30000')  # 30秒超时
     except:
         pass
     
