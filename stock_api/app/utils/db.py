@@ -327,8 +327,9 @@ def get_stock_connection():
     return get_connection(STOCK_DB_PATH)
 
 
+@with_retry()
 def query_one(sql: str, params: tuple = None, db_path: str = None, use_cache: bool = False) -> Optional[dict]:
-    """查询单条记录"""
+    """查询单条记录（带重试）"""
     # 尝试从缓存获取
     cache_key = f"query_one:{sql}:{params}"
     if use_cache:
@@ -355,8 +356,9 @@ def query_one(sql: str, params: tuple = None, db_path: str = None, use_cache: bo
     return result
 
 
+@with_retry()
 def query_all(sql: str, params: tuple = None, db_path: str = None, use_cache: bool = False) -> list:
-    """查询多条记录"""
+    """查询多条记录（带重试）"""
     # 尝试从缓存获取
     cache_key = f"query_all:{sql}:{params}"
     if use_cache:
@@ -383,8 +385,9 @@ def query_all(sql: str, params: tuple = None, db_path: str = None, use_cache: bo
     return result
 
 
+@with_retry()
 def execute(sql: str, params: tuple = None, db_path: str = None) -> int:
-    """执行SQL"""
+    """执行SQL（带重试）"""
     conn = get_connection(db_path)
     cursor = conn.cursor()
     
