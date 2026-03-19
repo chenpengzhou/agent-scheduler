@@ -94,6 +94,7 @@
                             </thead>
                             <tbody></tbody>
                         </table>
+                        <nav><ul class="pagination pagination-sm" id="usersPagination"></ul></nav>
                     </div>
                 </div>
                 
@@ -154,29 +155,64 @@
             }
         }
         
+        let usersData = [];
+        const PAGE_SIZE = 10;
+        let currentPage = 1;
+        
         async function loadUsers() {
             try {
                 const res = await fetch(API_BASE + '/api/admin/settings/users', {
                     headers: {'Authorization': 'Bearer ' + token}
                 });
                 const data = await res.json();
-                
-                const roleMap = { 'admin': '管理员', 'user': '普通用户' };
-                
-                document.querySelector('#usersTable tbody').innerHTML = data.map(u => `
-                    <tr>
-                        <td>${u.id}</td>
-                        <td>${u.username}</td>
-                        <td>${roleMap[u.role] || u.role}</td>
-                        <td><span class="badge bg-${u.is_active ? 'success' : 'secondary'}">${u.is_active ? '正常' : '禁用'}</span></td>
-                        <td>
-                            <button class="btn btn-sm btn-danger" onclick="deleteUser(${u.id})">删除</button>
-                        </td>
-                    </tr>
-                `).join('');
+                usersData = data;
+                renderUsersPage(1);
             } catch (err) {
                 console.error(err);
             }
+        }
+        
+        function renderUsersPage(page) {
+            currentPage = page;
+            const start = (page - 1) * PAGE_SIZE;
+            const end = start + PAGE_SIZE;
+            const pageData = usersData.slice(start, end);
+            
+            const roleMap = { 'admin': '管理员', 'user': '普通用户' };
+            
+            document.querySelector('#usersTable tbody').innerHTML = pageData.map(u => `
+                <tr>
+                    <td>${u.id}</td>
+                    <td>${u.username}</td>
+                    <td>${roleMap[u.role] || u.role}</td>
+                    <td><span class="badge bg-${u.is_active ? 'success' : 'secondary'}">${u.is_active ? '正常' : '禁用'}</span></td>
+                    <td>
+                        <button class="btn btn-sm btn-danger" onclick="deleteUser(${u.id})">删除</button>
+                    </td>
+                </tr>
+            `).join('');
+            
+            renderUsersPagination();
+        }
+        
+        function renderUsersPagination() {
+            const totalPages = Math.ceil(usersData.length / PAGE_SIZE);
+            const pagination = document.getElementById('usersPagination');
+            if (!pagination) return;
+            
+            let html = '';
+            if (totalPages > 1) {
+                html += `<li class="page-item ${currentPage === 1 ? 'disabled' : ''}"><a class="page-link" href="#" onclick="renderUsersPage(${currentPage - 1}); return false;">上一页</a></li>`;
+                for (let i = 1; i <= totalPages; i++) {
+                    if (i === 1 || i === totalPages || (i >= currentPage - 2 && i <= currentPage + 2)) {
+                        html += `<li class="page-item ${i === currentPage ? 'active' : ''}"><a class="page-link" href="#" onclick="renderUsersPage(${i}); return false;">${i}</a></li>`;
+                    } else if (i === currentPage - 3 || i === currentPage + 3) {
+                        html += `<li class="page-item disabled"><span class="page-link">...</span></li>`;
+                    }
+                }
+                html += `<li class="page-item ${currentPage === totalPages ? 'disabled' : ''}"><a class="page-link" href="#" onclick="renderUsersPage(${currentPage + 1}); return false;">下一页</a></li>`;
+            }
+            pagination.innerHTML = html;
         }
         
         async function createUser() {

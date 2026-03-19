@@ -8,6 +8,7 @@ Tushare数据同步脚本
 """
 import os
 import sys
+import time
 import sqlite3
 import pandas as pd
 import logging
@@ -70,11 +71,28 @@ def get_last_trade_date(pro):
         return (datetime.now() - timedelta(days=7)).strftime('%Y%m%d')
 
 
+
+
+def insert_replace_daily(conn, df):
+    """使用INSERT OR REPLACE插入数据"""
+    for _, row in df.iterrows():
+        conn.execute("""
+            INSERT OR REPLACE INTO stock_daily 
+            (stock_code, trade_date, open, high, low, close, volume, amount, ts_code, date)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            row['ts_code'], row['trade_date'], row['open'], row['high'], 
+            row['low'], row['close'], row['volume'], row['amount'],
+            row['ts_code'], row['trade_date']
+        ))
+
+
 def sync_stock_daily(pro, trade_date: str):
     """同步股票日线数据"""
     try:
         # 获取A股所有股票
         df = pro.stock_basic(exchange='', list_status='L', fields='ts_code,symbol,name,area,industry,list_date')
+        time.sleep(0.5)  # 获取股票列表也需要等待
         
         synced = 0
         failed = 0
@@ -85,22 +103,25 @@ def sync_stock_daily(pro, trade_date: str):
                 # 获取日线数据
                 daily_df = pro.daily(ts_code=ts_code, start_date=trade_date, end_date=trade_date)
                 
+                # Tushare速率限制：500次/分钟，需要添加延迟
+                time.sleep(0.2)  # 200ms，确保不超过500次/分钟
+                
                 # 只保留数据库需要的字段（先选择再重命名）
                 keep_cols = ['ts_code', 'trade_date', 'open', 'high', 'low', 'close', 'vol', 'amount']
                 daily_df = daily_df[[c for c in keep_cols if c in daily_df.columns]]
                 
-                # 转换字段名 Tushare -> 数据库
+                # 转换字段名 Tushare -> 数据库（只转换vol）
                 daily_df = daily_df.rename(columns={
-                    'trade_date': 'date',
                     'vol': 'volume'
                 })
+                
+                # 添加stock_code字段（Tushare格式）
+                daily_df['stock_code'] = daily_df['ts_code']
                 
                 if daily_df is not None and not daily_df.empty:
                     # 写入数据库
                     conn = sqlite3.connect(DB_PATH)
-                    daily_df.to_sql('stock_daily', conn, if_exists='append', index=False)
-                    conn.close()
-                    synced += 1
+                    insert_replace_daily(conn, daily_df)
                     logger.info(f"同步成功: {ts_code}")
                 else:
                     logger.warning(f"无数据: {ts_code}")
