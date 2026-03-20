@@ -8,7 +8,7 @@ from typing import Optional, List
 from datetime import datetime
 
 from app.services.api_key_service import api_key_service, Role
-from app.routers.auth import get_current_user
+from app.auth import auth_service
 
 router = APIRouter(prefix="/api/admin/api-keys", tags=["API Keys"])
 
@@ -61,33 +61,70 @@ class RateLimitStatus(BaseModel):
     reset_at: str
 
 
-def get_current_user(request: Request) -> dict:
+def get_current_user(authorization: str = Header(None)) -> dict:
     """获取当前用户"""
-    return request.state.user
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="未授权")
+    token = authorization.replace("Bearer ", "")
+    user = auth_service.verify_token(token)
+    if not user:
+        raise HTTPException(status_code=401, detail="无效token")
+    return user
 
 
-def require_admin(request: Request) -> dict:
+def require_admin(user: dict = Depends(get_current_user)) -> dict:
     """需要管理员权限"""
-    user = request.state.user
     if not user.get('is_admin'):
         raise HTTPException(status_code=403, detail="需要管理员权限")
     return user
 
 
+# ========== 固定路径路由必须放在 /{key_id} 之前 ==========
+
+@router.post("/validate")
+async def validate_api_key(key: str):
+    """验证API Key（用于测试）"""
+    result = api_key_service.validate_key(key)
+    if result:
+        return {
+            "valid": True,
+            "id": result.get('id'),
+            "name": result.get('name'),
+            "role": result.get('role', 'user'),
+            "permissions": result.get('permissions', [])
+        }
+    return {"valid": False}
+
+
+@router.get("/roles/list")
+async def list_roles():
+    """列出所有可用的角色及其权限"""
+    return {
+        "roles": [
+            {"name": role, "permissions": perms}
+            for role, perms in Role.PERMISSIONS.items()
+        ]
+    }
+
+
+@router.get("/stats/summary", response_model=UsageStatsResponse)
+async def get_usage_stats_summary(
+    days: int = Query(7, ge=1, le=90),
+    user: dict = Depends(require_admin)
+):
+    """获取所有Key的使用统计汇总（仅管理员）"""
+    stats = api_key_service.get_usage_stats(key_id=None, days=days)
+    return UsageStatsResponse(**stats)
+
+
+# ========== 需要 key_id 的路由放在后面 ==========
+
 @router.post("/", response_model=ApiKeyResponse)
 async def create_api_key(
     request: CreateKeyRequest,
-    authorization: str = Header(None)
+    user: dict = Depends(get_current_user)
 ):
     """创建新的API Key"""
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="未授权")
-    
-    token = authorization.replace("Bearer ", "")
-    user = get_current_user(token)
-    if not user:
-        raise HTTPException(status_code=401, detail="无效token")
-    
     # 验证角色
     if request.role not in Role.PERMISSIONS:
         raise HTTPException(status_code=400, detail=f"无效的角色: {request.role}")
@@ -106,18 +143,10 @@ async def create_api_key(
 
 @router.get("/", response_model=List[ApiKeyResponse])
 async def list_api_keys(
-    authorization: str = Header(None),
+    user: dict = Depends(get_current_user),
     include_inactive: bool = Query(False, description="包含已停用的Key")
 ):
     """列出所有API Keys"""
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="未授权")
-    
-    token = authorization.replace("Bearer ", "")
-    user = get_current_user(token)
-    if not user:
-        raise HTTPException(status_code=401, detail="无效token")
-    
     # 非管理员只能看自己的keys
     user_id = None if user.get('is_admin') else user.get('user_id')
     
@@ -148,17 +177,9 @@ async def list_api_keys(
 @router.get("/{key_id}", response_model=ApiKeyResponse)
 async def get_api_key(
     key_id: int,
-    authorization: str = Header(None)
+    user: dict = Depends(get_current_user)
 ):
     """获取单个API Key详情"""
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="未授权")
-    
-    token = authorization.replace("Bearer ", "")
-    user = get_current_user(token)
-    if not user:
-        raise HTTPException(status_code=401, detail="无效token")
-    
     key = api_key_service.get_key(key_id)
     if not key:
         raise HTTPException(status_code=404, detail="API Key不存在")
@@ -187,17 +208,9 @@ async def get_api_key(
 async def update_api_key(
     key_id: int,
     request: UpdateKeyRequest,
-    authorization: str = Header(None)
+    user: dict = Depends(get_current_user)
 ):
     """更新API Key"""
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="未授权")
-    
-    token = authorization.replace("Bearer ", "")
-    user = get_current_user(token)
-    if not user:
-        raise HTTPException(status_code=401, detail="无效token")
-    
     # 非管理员只能更新自己的keys
     key = api_key_service.get_key(key_id)
     if not key:
@@ -229,18 +242,10 @@ async def update_api_key(
 @router.delete("/{key_id}")
 async def delete_api_key(
     key_id: int,
-    authorization: str = Header(None),
+    user: dict = Depends(get_current_user),
     soft: bool = Query(True, description="软删除")
 ):
     """删除API Key"""
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="未授权")
-    
-    token = authorization.replace("Bearer ", "")
-    user = get_current_user(token)
-    if not user:
-        raise HTTPException(status_code=401, detail="无效token")
-    
     # 非管理员只能删除自己的keys
     key = api_key_service.get_key(key_id)
     if not key:
@@ -257,17 +262,9 @@ async def delete_api_key(
 async def get_key_usage_stats(
     key_id: int,
     days: int = Query(7, ge=1, le=90),
-    authorization: str = Header(None)
+    user: dict = Depends(get_current_user)
 ):
     """获取Key的使用统计"""
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="未授权")
-    
-    token = authorization.replace("Bearer ", "")
-    user = get_current_user(token)
-    if not user:
-        raise HTTPException(status_code=401, detail="无效token")
-    
     # 验证权限
     key = api_key_service.get_key(key_id)
     if not key:
@@ -283,66 +280,11 @@ async def get_key_usage_stats(
 @router.get("/{key_id}/rate-limit")
 async def get_rate_limit_status(
     key_id: int,
-    authorization: str = Header(None)
+    user: dict = Depends(get_current_user)
 ):
     """获取速率限制状态"""
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="未授权")
-    
-    token = authorization.replace("Bearer ", "")
-    user = get_current_user(token)
-    if not user:
-        raise HTTPException(status_code=401, detail="无效token")
-    
     status = api_key_service.get_rate_limit_status(key_id)
     if "error" in status:
         raise HTTPException(status_code=404, detail=status["error"])
     
     return status
-
-
-@router.get("/stats/summary", response_model=UsageStatsResponse)
-async def get_usage_stats_summary(
-    days: int = Query(7, ge=1, le=90),
-    authorization: str = Header(None)
-):
-    """获取所有Key的使用统计汇总（仅管理员）"""
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="未授权")
-    
-    token = authorization.replace("Bearer ", "")
-    user = get_current_user(token)
-    if not user:
-        raise HTTPException(status_code=401, detail="无效token")
-    
-    if not user.get('is_admin'):
-        raise HTTPException(status_code=403, detail="需要管理员权限")
-    
-    stats = api_key_service.get_usage_stats(key_id=None, days=days)
-    return UsageStatsResponse(**stats)
-
-
-@router.post("/validate")
-async def validate_api_key(key: str):
-    """验证API Key（用于测试）"""
-    result = api_key_service.validate_key(key)
-    if result:
-        return {
-            "valid": True,
-            "id": result.get('id'),
-            "name": result.get('name'),
-            "role": result.get('role', 'user'),
-            "permissions": result.get('permissions', [])
-        }
-    return {"valid": False}
-
-
-@router.get("/roles/list")
-async def list_roles():
-    """列出所有可用的角色及其权限"""
-    return {
-        "roles": [
-            {"name": role, "permissions": perms}
-            for role, perms in Role.PERMISSIONS.items()
-        ]
-    }
