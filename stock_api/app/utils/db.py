@@ -162,17 +162,35 @@ def init_db(db_path: str = None):
         )
     ''')
     
-    # API配置表
+    # API配置表 - 增强版
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS api_keys (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name VARCHAR(100) NOT NULL,
             key_value VARCHAR(255) NOT NULL,
+            key_prefix VARCHAR(20),
             is_active BOOLEAN DEFAULT 1,
             rate_limit INTEGER DEFAULT 100,
+            role VARCHAR(50) DEFAULT 'user',
+            permissions TEXT,
             created_by INTEGER,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            expires_at TIMESTAMP
+            expires_at TIMESTAMP,
+            last_used_at TIMESTAMP
+        )
+    ''')
+    
+    # API使用量统计表
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS api_usage (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            api_key_id INTEGER NOT NULL,
+            endpoint VARCHAR(100) NOT NULL,
+            method VARCHAR(10) NOT NULL,
+            status_code INTEGER,
+            response_time_ms INTEGER,
+            call_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (api_key_id) REFERENCES api_keys(id)
         )
     ''')
     
@@ -310,6 +328,9 @@ def init_db(db_path: str = None):
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_stock_daily_code ON stock_daily(ts_code)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_stock_daily_date ON stock_daily(date)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_api_keys_active ON api_keys(is_active)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_api_keys_prefix ON api_keys(key_prefix)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_api_usage_key ON api_usage(api_key_id)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_api_usage_time ON api_usage(call_time)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_sync_configs_enabled ON sync_configs(enabled)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_strategies_active ON strategies(is_active)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_alert_rules_enabled ON alert_rules(enabled)')

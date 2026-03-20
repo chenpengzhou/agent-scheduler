@@ -1,15 +1,16 @@
 # -*- coding: utf-8 -*-
 """
-中间件 - Token验证
+中间件 - Token验证 + API Key认证
 """
 from fastapi import Request, HTTPException
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from app.auth import auth_service
+from app.services.api_key_service import api_key_service
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
-    """认证中间件"""
+    """认证中间件 - 支持 Bearer Token 和 API Key"""
     
     # 公开路径（完全匹配）
     PUBLIC_PATHS = [
@@ -30,6 +31,8 @@ class AuthMiddleware(BaseHTTPMiddleware):
         "/api/auth/login",
         "/api/auth/logout",
         "/api/auth/refresh",
+        "/api/admin/api-keys/validate",  # Key验证接口公开
+        "/api/admin/api-keys/roles/list",  # 角色列表公开
     ]
     
     async def dispatch(self, request: Request, call_next):
@@ -43,13 +46,26 @@ class AuthMiddleware(BaseHTTPMiddleware):
             if path.startswith(prefix):
                 return await call_next(request)
         
-        # 验证Token
+        # 尝试 API Key 认证
+        x_api_key = request.headers.get("X-API-Key")
+        if x_api_key:
+            key_info = api_key_service.validate_key(x_api_key)
+            if key_info:
+                request.state.user = key_info
+                request.state.auth_type = "api_key"
+                return await call_next(request)
+            return JSONResponse(
+                status_code=401,
+                content={"detail": "Invalid or expired API Key"}
+            )
+        
+        # 尝试 Bearer Token 认证
         auth_header = request.headers.get("Authorization", "")
         
         if not auth_header or not auth_header.startswith("Bearer "):
             return JSONResponse(
                 status_code=401,
-                content={"detail": "Missing or invalid token"}
+                content={"detail": "Missing authentication. Provide X-API-Key header or Bearer token"}
             )
         
         token = auth_header.replace("Bearer ", "")
@@ -63,5 +79,6 @@ class AuthMiddleware(BaseHTTPMiddleware):
         
         # 将用户信息存入request.state
         request.state.user = payload
+        request.state.auth_type = "bearer"
         
         return await call_next(request)
