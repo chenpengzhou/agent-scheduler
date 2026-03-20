@@ -109,7 +109,9 @@ class ApiKeyService:
             "id": key_id,
             "name": name,
             "key": key_value,  # 返回完整key，只显示一次
-            "key_hint": f"{key_value[:12]}...",
+            "key_hint": f"{key_value[:8]}...",
+            "key_prefix": key_prefix,
+            "is_active": True,
             "rate_limit": rate_limit,
             "role": role,
             "permissions": permissions,
