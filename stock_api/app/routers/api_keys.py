@@ -8,7 +8,7 @@ from typing import Optional, List
 from datetime import datetime
 
 from app.services.api_key_service import api_key_service, Role
-from app.auth import get_current_user
+from app.routers.auth import get_current_user
 
 router = APIRouter(prefix="/api/admin/api-keys", tags=["API Keys"])
 
