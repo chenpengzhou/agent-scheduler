@@ -168,33 +168,175 @@ class StockSyncService:
         logger.info(f"同步任务完成. 成功: {completed}, 失败: {len(failed)}")
     
     def _fetch_stock_data(self, ts_code: str, retry: int = 3) -> Optional[pd.DataFrame]:
-        """获取股票数据（带重试）"""
-        for attempt in range(retry):
-            try:
-                # 模拟数据获取
-                # 实际应该调用: akshare, tushare 等数据源
-                dates = [(datetime.now() - timedelta(days=i)).strftime('%Y%m%d') for i in range(30)]
-                import random
-                base_price = random.uniform(10, 100)
-                
-                data = pd.DataFrame({
-                    'ts_code': [ts_code] * 30,
-                    'date': dates,
-                    'open': [base_price * random.uniform(0.98, 1.02) for _ in range(30)],
-                    'high': [base_price * random.uniform(1.0, 1.05) for _ in range(30)],
-                    'low': [base_price * random.uniform(0.95, 1.0) for _ in range(30)],
-                    'close': [base_price * random.uniform(0.98, 1.02) for _ in range(30)],
-                    'volume': [random.randint(1000000, 50000000) for _ in range(30)],
-                })
-                
-                return data
-                
-            except Exception as e:
-                logger.warning(f"获取数据失败 (尝试 {attempt + 1}/{retry}): {ts_code}, {e}")
-                if attempt < retry - 1:
-                    time.sleep(self.retry_delay)
+        """获取股票数据（带重试和多数据源自动切换）"""
+        # 按优先级尝试各数据源
+        sources = [
+            ("tushare", self._fetch_from_tushare),
+            ("akshare", self._fetch_from_akshare),
+            ("baostock", self._fetch_from_baostock),
+        ]
         
+        last_error = None
+        for source_name, fetch_func in sources:
+            for attempt in range(retry):
+                try:
+                    data = fetch_func(ts_code)
+                    if data is not None and not data.empty:
+                        logger.info(f"从 {source_name} 获取数据成功: {ts_code}")
+                        return data
+                except Exception as e:
+                    last_error = e
+                    logger.warning(f"从 {source_name} 获取数据失败 (尝试 {attempt + 1}/{retry}): {ts_code}, {e}")
+                    if attempt < retry - 1:
+                        time.sleep(self.retry_delay)
+            
+            logger.warning(f"{source_name} 数据源不可用，尝试下一个数据源...")
+        
+        logger.error(f"所有数据源均失败: {ts_code}, 最后错误: {last_error}")
         return None
+    
+    def _fetch_from_tushare(self, ts_code: str) -> Optional[pd.DataFrame]:
+        """从 Tushare 获取数据"""
+        token = os.environ.get("TUSHARE_TOKEN")
+        if not token:
+            logger.warning("TUSHARE_TOKEN 环境变量未设置")
+            return None
+        
+        import tushare as ts
+        
+        pro = ts.pro_api(token)
+        
+        # 获取最近30个交易日的数据
+        end_date = datetime.now().strftime('%Y%m%d')
+        start_date = (datetime.now() - timedelta(days=35)).strftime('%Y%m%d')
+        
+        # 先获取日线数据
+        df = pro.daily(ts_code=ts_code, start_date=start_date, end_date=end_date)
+        
+        if df is None or df.empty:
+            return None
+        
+        # 重命名字段以匹配数据库结构
+        df = df.rename(columns={
+            'trade_date': 'date',
+            'vol': 'volume'
+        })
+        
+        # 确保日期格式一致
+        df['date'] = df['date'].astype(str)
+        
+        return df
+    
+    def _fetch_from_akshare(self, ts_code: str) -> Optional[pd.DataFrame]:
+        """从 Akshare 获取数据"""
+        import akshare as ak
+        
+        # 转换代码格式: 600000.SH -> 600000
+        code = ts_code.split('.')[0]
+        market = ts_code.split('.')[1].lower()  # sh 或 sz
+        
+        # 使用 akshare 的股票历史数据接口
+        if market == 'sh':
+            symbol = f"sh{code}"
+        else:
+            symbol = f"sz{code}"
+        
+        try:
+            # 获取日线数据
+            df = ak.stock_zh_a_hist(symbol=code, period="daily", 
+                                    start_date=(datetime.now() - timedelta(days=35)).strftime('%Y%m%d'),
+                                    end_date=datetime.now().strftime('%Y%m%d'))
+            
+            if df is None or df.empty:
+                return None
+            
+            # 重命名字段
+            df = df.rename(columns={
+                '日期': 'date',
+                '开盘': 'open',
+                '最高': 'high',
+                '最低': 'low',
+                '收盘': 'close',
+                '成交量': 'volume',
+                '成交额': 'amount',
+                '涨跌幅': 'pct_change',
+            })
+            
+            # 转换日期格式
+            df['date'] = pd.to_datetime(df['date']).dt.strftime('%Y%m%d')
+            
+            # 添加 ts_code
+            df['ts_code'] = ts_code
+            
+            # 只保留需要的字段
+            fields = ['ts_code', 'date', 'open', 'high', 'low', 'close', 'volume']
+            for f in fields:
+                if f not in df.columns:
+                    df[f] = None
+            
+            return df[fields]
+            
+        except Exception as e:
+            logger.warning(f"akshare 获取失败: {ts_code}, {e}")
+            return None
+    
+    def _fetch_from_baostock(self, ts_code: str) -> Optional[pd.DataFrame]:
+        """从 Baostock 获取数据"""
+        import baostock as bs
+        
+        bs.login()
+        
+        try:
+            # 转换代码格式: 600000.SH -> sh.600000
+            code = ts_code.split('.')[0]
+            market = ts_code.split('.')[1].lower()
+            bs_code = f"{market}.{code}"
+            
+            start_date = (datetime.now() - timedelta(days=35)).strftime('%Y-%m-%d')
+            end_date = datetime.now().strftime('%Y-%m-%d')
+            
+            rs = bs.query_history_k_data_plus(
+                bs_code,
+                "date,code,open,high,low,close,volume,amount,turnover_rate",
+                start_date=start_date,
+                end_date=end_date,
+                frequency="d"
+            )
+            
+            data_list = []
+            while (rs.error_code == '0') and rs.next():
+                data_list.append(rs.get_row_data())
+            
+            if not data_list:
+                return None
+            
+            df = pd.DataFrame(data_list, columns=rs.fields)
+            
+            # 重命名字段
+            df = df.rename(columns={
+                'code': 'ts_code_original',
+            })
+            
+            # 添加 ts_code
+            df['ts_code'] = ts_code
+            
+            # 转换数值字段
+            for col in ['open', 'high', 'low', 'close', 'volume', 'amount', 'turnover_rate']:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+            
+            # 格式化日期
+            df['date'] = df['date'].str.replace('-', '')
+            
+            # 只保留需要的字段
+            fields = ['ts_code', 'date', 'open', 'high', 'low', 'close', 'volume']
+            for f in fields:
+                if f not in df.columns:
+                    df[f] = None
+            
+            return df[fields]
+            
+        finally:
+            bs.logout()
     
     def _save_stock_data(self, conn, ts_code: str, data: pd.DataFrame):
         """保存股票数据"""

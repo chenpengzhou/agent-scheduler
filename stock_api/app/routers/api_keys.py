@@ -131,7 +131,7 @@ async def create_api_key(
     
     result = api_key_service.create_key(
         name=request.name,
-        user_id=user["id"],
+        user_id=user["user_id"],
         role=request.role,
         rate_limit=request.rate_limit,
         expires_days=request.expires_days,
